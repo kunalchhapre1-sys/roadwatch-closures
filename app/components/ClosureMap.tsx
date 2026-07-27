@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { CircleMarker, GeoJSON, MapContainer, TileLayer, useMap } from "react-leaflet";
 import type { Feature, FeatureCollection, GeoJsonObject } from "geojson";
-import type { Layer, PathOptions } from "leaflet";
+import type { Layer, LeafletMouseEvent, PathOptions } from "leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -66,9 +66,18 @@ function popupForFeature(feature: Feature, layer: Layer) {
         `<dt>${labels[key] || key.replaceAll("_", " ")}</dt><dd>${escapeHtml(props[key])}</dd>`,
     )
     .join("");
-  if (rows && "bindPopup" in layer && typeof layer.bindPopup === "function") {
-    layer.bindPopup(`<div class="closure-popup"><strong>Road closure</strong><dl>${rows}</dl></div>`);
-  }
+  const popupMarkup = (coordinateRows = "") =>
+    `<div class="closure-popup"><strong>Road closure</strong><dl>${coordinateRows}${rows}</dl></div>`;
+
+  layer.bindPopup(popupMarkup());
+  layer.on("click", (event: LeafletMouseEvent) => {
+    const latitude = event.latlng.lat.toFixed(12);
+    const longitude = event.latlng.lng.toFixed(12);
+    const coordinateRows =
+      `<dt>Latitude</dt><dd class="coordinate-value">${latitude}</dd>` +
+      `<dt>Longitude</dt><dd class="coordinate-value">${longitude}</dd>`;
+    layer.setPopupContent(popupMarkup(coordinateRows));
+  });
 }
 
 const closureStyle: PathOptions = {
