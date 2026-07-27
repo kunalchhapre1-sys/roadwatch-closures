@@ -1,13 +1,39 @@
 "use client";
 
 import { useEffect } from "react";
-import { CircleMarker, GeoJSON, MapContainer, TileLayer, useMap } from "react-leaflet";
+import { CircleMarker, GeoJSON, MapContainer, useMap } from "react-leaflet";
 import type { Feature, FeatureCollection, GeoJsonObject } from "geojson";
 import type { Layer, PathOptions } from "leaflet";
 import L from "leaflet";
+import "@maplibre/maplibre-gl-leaflet";
 import "leaflet/dist/leaflet.css";
+import "maplibre-gl/dist/maplibre-gl.css";
 
 type Target = { lat: number; lng: number; nonce: number };
+const OLA_STYLE_URL =
+  "https://maps-stg.olaelectric.com/maps/v1/styles/default-light-standard/style.json";
+
+function OlaBaseMap() {
+  const map = useMap();
+
+  useEffect(() => {
+    const attribution = "&copy; OLA Maps contributors";
+    const layer = L.maplibreGL({
+      style: OLA_STYLE_URL,
+      interactive: false,
+      attributionControl: false,
+    });
+    layer.addTo(map);
+    map.attributionControl?.addAttribution(attribution);
+
+    return () => {
+      map.removeLayer(layer);
+      map.attributionControl?.removeAttribution(attribution);
+    };
+  }, [map]);
+
+  return null;
+}
 
 function FlyToTarget({ target }: { target: Target }) {
   const map = useMap();
@@ -97,10 +123,7 @@ export default function ClosureMap({
       className="leaflet-map"
       zoomControl
     >
-      <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-      />
+      <OlaBaseMap />
       <GeoJSON
         key={`${features.features.length}-${target.nonce}`}
         data={features}
