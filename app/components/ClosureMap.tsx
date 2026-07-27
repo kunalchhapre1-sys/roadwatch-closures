@@ -32,11 +32,39 @@ function FitClosures({ features }: { features: FeatureCollection }) {
 
 function popupForFeature(feature: Feature, layer: Layer) {
   const props = feature.properties || {};
-  const preferred = ["name", "road_name", "road", "status", "reason", "description", "start_date", "end_date"];
+  const preferred = [
+    "city",
+    "endtz",
+    "name",
+    "road_name",
+    "road",
+    "status",
+    "reason",
+    "description",
+    "start_date",
+    "end_date",
+  ];
+  const labels: Record<string, string> = {
+    city: "City",
+    endtz: "End date",
+    road_name: "Road name",
+    start_date: "Start date",
+    end_date: "End date",
+  };
+  const escapeHtml = (value: unknown) =>
+    String(value)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
   const rows = preferred
     .filter((key) => props[key] !== undefined && props[key] !== null)
-    .slice(0, 6)
-    .map((key) => `<dt>${key.replaceAll("_", " ")}</dt><dd>${String(props[key])}</dd>`)
+    .slice(0, 8)
+    .map(
+      (key) =>
+        `<dt>${labels[key] || key.replaceAll("_", " ")}</dt><dd>${escapeHtml(props[key])}</dd>`,
+    )
     .join("");
   if (rows && "bindPopup" in layer && typeof layer.bindPopup === "function") {
     layer.bindPopup(`<div class="closure-popup"><strong>Road closure</strong><dl>${rows}</dl></div>`);
