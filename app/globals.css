@@ -193,6 +193,10 @@ button {
   border-bottom: 1px solid var(--line);
 }
 
+.tabs.viewer-only {
+  grid-template-columns: 1fr;
+}
+
 .tabs button {
   border: 0;
   border-bottom: 2px solid transparent;

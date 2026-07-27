@@ -193,10 +193,18 @@ export default function Home() {
           <div className="panel-heading">
             <p className="eyebrow">Map controls</p>
             <h1>Road closure viewer</h1>
-            <p>Navigate by coordinate or publish the latest closure file for everyone.</p>
+            <p>
+              {status.canUpload
+                ? "Navigate by coordinate or publish the latest closure file for everyone."
+                : "Explore active closures and navigate to any coordinate in view-only mode."}
+            </p>
           </div>
 
-          <div className="tabs" role="tablist" aria-label="Dashboard tools">
+          <div
+            className={`tabs ${status.canUpload ? "" : "viewer-only"}`}
+            role="tablist"
+            aria-label="Dashboard tools"
+          >
             <button
               role="tab"
               aria-selected={activeTab === "location"}
@@ -205,14 +213,16 @@ export default function Home() {
             >
               Lat / Long
             </button>
-            <button
-              role="tab"
-              aria-selected={activeTab === "upload"}
-              className={activeTab === "upload" ? "active" : ""}
-              onClick={() => setActiveTab("upload")}
-            >
-              Input file
-            </button>
+            {status.canUpload && (
+              <button
+                role="tab"
+                aria-selected={activeTab === "upload"}
+                className={activeTab === "upload" ? "active" : ""}
+                onClick={() => setActiveTab("upload")}
+              >
+                Input file
+              </button>
+            )}
           </div>
 
           {activeTab === "location" ? (
