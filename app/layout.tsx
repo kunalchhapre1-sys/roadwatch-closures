@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "RoadWatch — Active Road Closures",
   description:
-    "A live OLA Maps dashboard for viewing and publishing active road closure GeoPackages.",
+    "A live OpenStreetMap dashboard for viewing and publishing active road closure GeoPackages.",
   openGraph: {
     title: "RoadWatch — Active Road Closures",
     description:
