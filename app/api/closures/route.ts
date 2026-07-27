@@ -9,6 +9,12 @@ function bucket() {
   return env.ROAD_CLOSURES as R2Bucket;
 }
 
+function isAdministrator(request: Request) {
+  const requestEmail = request.headers.get("oai-authenticated-user-email")?.trim().toLowerCase();
+  const adminEmail = env.ADMIN_EMAIL?.trim().toLowerCase();
+  return Boolean(requestEmail && adminEmail && requestEmail === adminEmail);
+}
+
 export async function GET() {
   const object = await bucket().get(OBJECT_KEY);
   if (!object) return Response.json({ error: "No GeoPackage has been published." }, { status: 404 });
@@ -23,6 +29,12 @@ export async function GET() {
 }
 
 export async function PUT(request: Request) {
+  if (!isAdministrator(request)) {
+    return Response.json(
+      { error: "Sign in with the dashboard administrator account to publish a file." },
+      { status: 403 },
+    );
+  }
   const contentLength = Number(request.headers.get("content-length") || 0);
   if (!contentLength || contentLength > MAX_FILE_SIZE) {
     return Response.json({ error: "The GeoPackage must be 50 MB or smaller." }, { status: 413 });

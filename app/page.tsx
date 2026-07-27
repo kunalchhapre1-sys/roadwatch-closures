@@ -12,6 +12,7 @@ const ClosureMap = dynamic(() => import("./components/ClosureMap"), {
 
 type FileStatus = {
   exists: boolean;
+  canUpload?: boolean;
   etag?: string;
   updatedAt?: string;
   fileName?: string;
@@ -252,17 +253,28 @@ export default function Home() {
                   <p>Uploading replaces the current shared closure layer.</p>
                 </div>
               </div>
-              <label className={`drop-zone ${isBusy ? "disabled" : ""}`}>
-                <input
-                  type="file"
-                  accept=".gpkg,application/geopackage+sqlite3"
-                  onChange={uploadFile}
-                  disabled={isBusy}
-                />
-                <span className="drop-symbol" aria-hidden="true">＋</span>
-                <strong>{isBusy ? "Publishing…" : "Choose a .gpkg file"}</strong>
-                <small>Maximum file size: 50 MB</small>
-              </label>
+              {status.canUpload ? (
+                <label className={`drop-zone ${isBusy ? "disabled" : ""}`}>
+                  <input
+                    type="file"
+                    accept=".gpkg,application/geopackage+sqlite3"
+                    onChange={uploadFile}
+                    disabled={isBusy}
+                  />
+                  <span className="drop-symbol" aria-hidden="true">＋</span>
+                  <strong>{isBusy ? "Publishing…" : "Choose a .gpkg file"}</strong>
+                  <small>Maximum file size: 50 MB</small>
+                </label>
+              ) : (
+                <div className="drop-zone admin-lock">
+                  <span className="drop-symbol lock-symbol" aria-hidden="true">•</span>
+                  <strong>Administrator upload</strong>
+                  <small>Sign in with the dashboard owner account to replace the shared file.</small>
+                  <a className="secondary-button" href="/signin-with-chatgpt?return_to=%2F">
+                    Sign in to upload
+                  </a>
+                </div>
+              )}
               <div className="published-file">
                 <span className="file-badge" aria-hidden="true">GPKG</span>
                 <div>

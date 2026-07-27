@@ -370,6 +370,8 @@ button {
 .drop-zone small {
   color: var(--muted);
   font-size: 11px;
+  max-width: 250px;
+  line-height: 1.4;
 }
 
 .drop-symbol {
@@ -381,6 +383,31 @@ button {
   background: #e2efea;
   color: var(--green);
   font-size: 21px;
+}
+
+.lock-symbol {
+  font-size: 0;
+}
+
+.lock-symbol::before {
+  content: "";
+  width: 10px;
+  height: 9px;
+  border: 2px solid var(--green);
+  border-radius: 2px;
+  box-shadow: 0 -6px 0 -3px #e2efea, 0 -6px 0 -1px var(--green);
+}
+
+.secondary-button {
+  margin-top: 4px;
+  border: 1px solid #bfd1ca;
+  border-radius: 7px;
+  padding: 7px 11px;
+  background: white;
+  color: var(--green-dark);
+  font-size: 11px;
+  font-weight: 800;
+  text-decoration: none;
 }
 
 .published-file {
