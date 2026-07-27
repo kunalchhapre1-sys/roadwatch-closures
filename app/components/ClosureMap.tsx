@@ -76,7 +76,8 @@ const closureStyle: PathOptions = {
   weight: 5,
   opacity: 0.94,
   fillColor: "#ef4b3e",
-  fillOpacity: 0.28,
+  fillOpacity: 0.14,
+  dashArray: "1 10",
   lineCap: "round",
   lineJoin: "round",
 };

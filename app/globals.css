@@ -558,10 +558,12 @@ button {
 }
 
 .closure-swatch {
-  width: 7px;
-  height: 30px;
-  border-radius: 99px;
-  background: var(--red);
+  width: 34px;
+  height: 6px;
+  background-image: radial-gradient(circle, var(--red) 0 2.5px, transparent 2.7px);
+  background-size: 10px 6px;
+  background-repeat: repeat-x;
+  background-position: left center;
 }
 
 .feature-count div {
