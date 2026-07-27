@@ -267,6 +267,10 @@ button {
   letter-spacing: 0.08em;
 }
 
+.tool-content .combined-coordinate {
+  grid-column: 1 / -1;
+}
+
 .tool-content input[type="text"],
 .tool-content input:not([type]) {
   width: 100%;

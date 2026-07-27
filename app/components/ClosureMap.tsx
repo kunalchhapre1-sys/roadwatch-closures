@@ -61,7 +61,13 @@ export default function ClosureMap({
   target: Target;
 }) {
   return (
-    <MapContainer center={[20.5937, 78.9629]} zoom={5} minZoom={2} className="leaflet-map" zoomControl>
+    <MapContainer
+      center={[12.881703576462842, 77.75966530609753]}
+      zoom={14}
+      minZoom={2}
+      className="leaflet-map"
+      zoomControl
+    >
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"

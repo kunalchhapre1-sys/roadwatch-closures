@@ -45,12 +45,13 @@ export default function Home() {
   const [status, setStatus] = useState<FileStatus>({ exists: false });
   const [activeTab, setActiveTab] = useState<"location" | "upload">("location");
   const [coordinates, setCoordinates] = useState<Coordinates>({
-    lat: 20.5937,
-    lng: 78.9629,
+    lat: 12.881703576462842,
+    lng: 77.75966530609753,
     nonce: 0,
   });
-  const [lat, setLat] = useState("20.5937");
-  const [lng, setLng] = useState("78.9629");
+  const [coordinateInput, setCoordinateInput] = useState(
+    "12.881703576462842, 77.75966530609753",
+  );
   const [message, setMessage] = useState("Waiting for a published GeoPackage");
   const [isBusy, setIsBusy] = useState(false);
   const [parseProgress, setParseProgress] = useState("");
@@ -104,8 +105,13 @@ export default function Home() {
 
   function goToLocation(event: React.FormEvent) {
     event.preventDefault();
-    const nextLat = Number(lat);
-    const nextLng = Number(lng);
+    const parts = coordinateInput.split(",").map((value) => value.trim());
+    if (parts.length !== 2 || parts.some((value) => value === "")) {
+      setMessage("Use this format: latitude, longitude");
+      return;
+    }
+    const nextLat = Number(parts[0]);
+    const nextLng = Number(parts[1]);
     if (!Number.isFinite(nextLat) || nextLat < -90 || nextLat > 90) {
       setMessage("Latitude must be between −90 and 90.");
       return;
@@ -218,30 +224,20 @@ export default function Home() {
                   <p>Enter WGS84 decimal coordinates.</p>
                 </div>
               </div>
-              <label>
-                Latitude
+              <label className="combined-coordinate">
+                Latitude, Longitude
                 <input
-                  inputMode="decimal"
-                  value={lat}
-                  onChange={(event) => setLat(event.target.value)}
-                  placeholder="e.g. 19.0760"
-                  aria-label="Latitude"
-                />
-              </label>
-              <label>
-                Longitude
-                <input
-                  inputMode="decimal"
-                  value={lng}
-                  onChange={(event) => setLng(event.target.value)}
-                  placeholder="e.g. 72.8777"
-                  aria-label="Longitude"
+                  inputMode="text"
+                  value={coordinateInput}
+                  onChange={(event) => setCoordinateInput(event.target.value)}
+                  placeholder="12.881703576462842, 77.75966530609753"
+                  aria-label="Latitude and longitude"
                 />
               </label>
               <button className="primary-button" type="submit">Go to location</button>
               <div className="coordinate-card">
                 <span>Current target</span>
-                <strong>{coordinates.lat.toFixed(5)}, {coordinates.lng.toFixed(5)}</strong>
+                <strong>{coordinates.lat}, {coordinates.lng}</strong>
               </div>
             </form>
           ) : (
