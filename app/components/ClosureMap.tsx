@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect } from "react";
-import { CircleMarker, GeoJSON, MapContainer, TileLayer, useMap } from "react-leaflet";
+import {
+  AttributionControl,
+  CircleMarker,
+  GeoJSON,
+  MapContainer,
+  TileLayer,
+  useMap,
+} from "react-leaflet";
 import type { Feature, FeatureCollection, GeoJsonObject } from "geojson";
 import type { Layer, LeafletMouseEvent, PathOptions } from "leaflet";
 import L from "leaflet";
@@ -71,11 +78,9 @@ function popupForFeature(feature: Feature, layer: Layer) {
 
   layer.bindPopup(popupMarkup());
   layer.on("click", (event: LeafletMouseEvent) => {
-    const latitude = event.latlng.lat.toFixed(12);
-    const longitude = event.latlng.lng.toFixed(12);
+    const coordinate = `${event.latlng.lat}, ${event.latlng.lng}`;
     const coordinateRows =
-      `<dt>Latitude</dt><dd class="coordinate-value">${latitude}</dd>` +
-      `<dt>Longitude</dt><dd class="coordinate-value">${longitude}</dd>`;
+      `<dt>Latitude, Longitude</dt><dd class="coordinate-value">${coordinate}</dd>`;
     layer.setPopupContent(popupMarkup(coordinateRows));
   });
 }
@@ -105,7 +110,9 @@ export default function ClosureMap({
       minZoom={2}
       className="leaflet-map"
       zoomControl
+      attributionControl={false}
     >
+      <AttributionControl position="bottomleft" prefix={false} />
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"

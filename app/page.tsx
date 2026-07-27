@@ -303,6 +303,10 @@ export default function Home() {
               <span>Closure features</span>
             </div>
           </div>
+          <div className="creator-credit">
+            <span>Designed &amp; created by</span>
+            <strong>Kunal Chhapre</strong>
+          </div>
         </section>
       </section>
     </main>

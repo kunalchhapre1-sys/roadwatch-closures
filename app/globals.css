@@ -549,12 +549,38 @@ button {
 
 .feature-count {
   right: 20px;
-  bottom: 28px;
+  bottom: 58px;
   border-radius: 10px;
   padding: 11px 14px;
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.creator-credit {
+  position: absolute;
+  right: 14px;
+  bottom: 12px;
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  border-radius: 8px;
+  background: rgba(23, 33, 31, 0.86);
+  box-shadow: 0 5px 18px rgba(18, 34, 29, 0.18);
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  backdrop-filter: blur(8px);
+}
+
+.creator-credit strong {
+  color: white;
+  font-size: 10px;
+  letter-spacing: 0.03em;
 }
 
 .closure-swatch {
@@ -702,6 +728,11 @@ button {
 
   .feature-count {
     right: 12px;
-    bottom: 22px;
+    bottom: 56px;
+  }
+
+  .creator-credit {
+    right: 10px;
+    bottom: 10px;
   }
 }
