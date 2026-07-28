@@ -172,7 +172,7 @@ def build_map(
         tiles=None,
         control_scale=True,
         prefer_canvas=True,
-        scroll_wheel_zoom=False,
+        scroll_wheel_zoom=True,
     )
     folium.TileLayer(
         tiles="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
