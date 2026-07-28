@@ -12,7 +12,6 @@ import pandas as pd
 import pyogrio
 import streamlit as st
 from branca.element import MacroElement, Template
-from folium.plugins import Fullscreen
 from streamlit_autorefresh import st_autorefresh
 from streamlit_folium import st_folium
 
@@ -33,121 +32,7 @@ st.set_page_config(
 )
 
 
-st.markdown(
-    """
-    <style>
-      :root {
-        --ink: #15231f;
-        --muted: #60706a;
-        --green: #176b5b;
-        --red: #e63b2e;
-        --paper: #f5f7f3;
-      }
-      .stApp { background: var(--paper); color: var(--ink); }
-      [data-testid="stHeader"] { background: transparent; }
-      [data-testid="stSidebar"] {
-        background: #ffffff;
-        border-right: 1px solid #dfe6e1;
-      }
-      [data-testid="stSidebar"] h1 {
-        color: var(--ink);
-        letter-spacing: -0.03em;
-      }
-      .block-container {
-        max-width: none;
-        padding: 1.25rem 1.5rem 2.5rem;
-      }
-      .roadwatch-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 1rem;
-        padding: .9rem 1.15rem;
-        margin-bottom: 1rem;
-        border: 1px solid #dfe6e1;
-        border-radius: 16px;
-        background: rgba(255,255,255,.92);
-        box-shadow: 0 10px 30px rgba(21,35,31,.06);
-      }
-      .roadwatch-brand { display: flex; align-items: center; gap: .75rem; }
-      .roadwatch-mark {
-        width: 38px;
-        height: 38px;
-        display: grid;
-        place-items: center;
-        border-radius: 12px;
-        color: white;
-        background: var(--green);
-        font-size: 1.15rem;
-      }
-      .roadwatch-brand strong { display: block; font-size: 1.05rem; }
-      .roadwatch-brand span { color: var(--muted); font-size: .78rem; }
-      .live-chip {
-        display: inline-flex;
-        align-items: center;
-        gap: .45rem;
-        padding: .42rem .7rem;
-        border-radius: 999px;
-        background: #e9f6f1;
-        color: var(--green);
-        font-size: .75rem;
-        font-weight: 800;
-        letter-spacing: .08em;
-      }
-      .live-dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: #1e9b73;
-        box-shadow: 0 0 0 4px rgba(30,155,115,.12);
-      }
-      .metric-row {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: .75rem;
-        margin-bottom: 1rem;
-      }
-      .metric-card {
-        padding: .85rem 1rem;
-        border: 1px solid #dfe6e1;
-        border-radius: 14px;
-        background: #fff;
-      }
-      .metric-card span {
-        display: block;
-        color: var(--muted);
-        font-size: .72rem;
-        text-transform: uppercase;
-        letter-spacing: .06em;
-      }
-      .metric-card strong {
-        display: block;
-        margin-top: .2rem;
-        font-size: 1.1rem;
-      }
-      iframe { border-radius: 16px; }
-      .creator-credit {
-        position: fixed;
-        right: 18px;
-        bottom: 10px;
-        z-index: 9999;
-        padding: .45rem .7rem;
-        border: 1px solid rgba(23,107,91,.18);
-        border-radius: 10px;
-        background: rgba(255,255,255,.92);
-        color: var(--muted);
-        font-size: .68rem;
-        box-shadow: 0 8px 24px rgba(21,35,31,.1);
-      }
-      .creator-credit strong { color: var(--ink); }
-      @media (max-width: 720px) {
-        .metric-row { grid-template-columns: 1fr; }
-        .block-container { padding: .75rem .6rem 2.5rem; }
-      }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+st.html(f"<style>{(APP_DIR / 'styles.css').read_text(encoding='utf-8')}</style>")
 
 
 def format_size(size: int) -> str:
@@ -278,8 +163,6 @@ def build_map(
         overlay=False,
         control=True,
     ).add_to(map_object)
-    Fullscreen(position="topright").add_to(map_object)
-
     if frame is not None and not frame.empty:
         layer = folium.GeoJson(
             data=geojson_data(frame),
@@ -355,15 +238,51 @@ if "target_selected" not in st.session_state:
     st.session_state.target_selected = False
 
 
+frame: gpd.GeoDataFrame | None = None
+metadata = {"layers": [], "feature_count": 0}
+load_error: str | None = None
+if ACTIVE_FILE.exists():
+    try:
+        frame, metadata = load_geopackage(
+            str(ACTIVE_FILE),
+            ACTIVE_FILE.stat().st_mtime_ns,
+        )
+    except Exception as error:
+        load_error = str(error)
+
+
+file_name = ACTIVE_FILE.name if ACTIVE_FILE.exists() else "No file loaded"
+file_size = format_size(ACTIVE_FILE.stat().st_size) if ACTIVE_FILE.exists() else "—"
+updated_time = (
+    datetime.fromtimestamp(ACTIVE_FILE.stat().st_mtime).strftime("%d %b %Y, %I:%M %p")
+    if ACTIVE_FILE.exists()
+    else "Waiting for upload"
+)
+
 with st.sidebar:
-    st.caption("MAP CONTROLS")
-    st.title("Road closure viewer")
-    st.write(
-        "Navigate by coordinate or replace the local GeoPackage displayed on the map."
+    st.html(
+        """
+        <div class="rw-panel-heading">
+          <p class="rw-eyebrow">Map controls</p>
+          <h1>Road closure viewer</h1>
+          <p>Navigate by coordinate or publish the latest closure file for everyone.</p>
+        </div>
+        """
     )
 
     location_tab, upload_tab = st.tabs(["Lat / Long", "Input file"])
     with location_tab:
+        st.html(
+            """
+            <div class="rw-tool-intro">
+              <div class="rw-tool-icon">⌖</div>
+              <div>
+                <strong>Go to a location</strong>
+                <span>Enter WGS84 decimal coordinates.</span>
+              </div>
+            </div>
+            """
+        )
         coordinate_text = st.text_input(
             "Latitude, Longitude",
             key="coordinate_text",
@@ -380,17 +299,31 @@ with st.sidebar:
                 st.rerun()
             except ValueError as error:
                 st.error(str(error))
-        st.caption(
-            "Current target: "
-            f"{st.session_state.target_latitude}, "
-            f"{st.session_state.target_longitude}"
+        st.html(
+            f"""
+            <div class="rw-coordinate-card">
+              <span>Current target</span>
+              <strong>{st.session_state.target_latitude}, {st.session_state.target_longitude}</strong>
+            </div>
+            """
         )
 
     with upload_tab:
+        st.html(
+            """
+            <div class="rw-tool-intro">
+              <div class="rw-tool-icon">↑</div>
+              <div>
+                <strong>Publish GeoPackage</strong>
+                <span>Uploading replaces the current closure layer.</span>
+              </div>
+            </div>
+            """
+        )
         uploaded_file = st.file_uploader(
             "Choose a GeoPackage",
             type=["gpkg"],
-            help="Uploading replaces python_app/data/current.gpkg.",
+            help="Maximum file size: 50 MB.",
         )
         if uploaded_file is not None:
             contents = uploaded_file.getvalue()
@@ -404,67 +337,54 @@ with st.sidebar:
                     st.cache_data.clear()
                     st.success(f"{uploaded_file.name} is now active.")
                     st.rerun()
+        st.html(
+            f"""
+            <div class="rw-file-card">
+              <strong>{html.escape(file_name)}</strong>
+              <span>{file_size} · {updated_time}</span>
+            </div>
+            """
+        )
         st.caption(
-            "You can also replace `python_app/data/current.gpkg` directly. "
-            "The dashboard checks for changes every 30 seconds."
+            "New files are checked automatically every 30 seconds. "
+            "Cloud deployments require persistent storage for durable uploads."
         )
 
-
-frame: gpd.GeoDataFrame | None = None
-metadata = {"layers": [], "feature_count": 0}
-load_error: str | None = None
-if ACTIVE_FILE.exists():
-    try:
-        frame, metadata = load_geopackage(
-            str(ACTIVE_FILE),
-            ACTIVE_FILE.stat().st_mtime_ns,
-        )
-    except Exception as error:
-        load_error = str(error)
+    if load_error:
+        st.error(f"The GeoPackage could not be read: {load_error}")
 
 
-st.markdown(
-    """
-    <div class="roadwatch-header">
-      <div class="roadwatch-brand">
-        <div class="roadwatch-mark">◆</div>
-        <div><strong>RoadWatch</strong><span>Active closure dashboard</span></div>
-      </div>
-      <div class="live-chip"><span class="live-dot"></span>LIVE · LOCAL</div>
-    </div>
-    """,
-    unsafe_allow_html=True,
+status_text = (
+    f'{metadata["feature_count"]:,} closure features visible'
+    if frame is not None and not load_error
+    else "Waiting for a published GeoPackage"
 )
+status_class = "ready" if frame is not None and not load_error else ""
 
-file_name = ACTIVE_FILE.name if ACTIVE_FILE.exists() else "No file loaded"
-file_size = format_size(ACTIVE_FILE.stat().st_size) if ACTIVE_FILE.exists() else "—"
-updated_time = (
-    datetime.fromtimestamp(ACTIVE_FILE.stat().st_mtime).strftime("%d %b %Y, %I:%M %p")
-    if ACTIVE_FILE.exists()
-    else "Waiting for upload"
-)
-st.markdown(
+st.html(
     f"""
-    <div class="metric-row">
-      <div class="metric-card"><span>Closure features</span>
-        <strong>{metadata["feature_count"]:,}</strong></div>
-      <div class="metric-card"><span>Published file</span>
-        <strong>{html.escape(file_name)} · {file_size}</strong></div>
-      <div class="metric-card"><span>Last update</span>
-        <strong>{updated_time}</strong></div>
+    <div class="rw-topbar">
+      <div class="rw-brand-mark" aria-hidden="true"><span></span></div>
+      <div class="rw-brand-copy">
+        <strong>RoadWatch</strong>
+        <span>Active closure dashboard</span>
+      </div>
+      <div class="rw-live-chip"><span class="rw-live-dot"></span>LIVE</div>
+      <div class="rw-header-status">
+        <span>Last update</span>
+        <strong>{updated_time}</strong>
+      </div>
     </div>
-    """,
-    unsafe_allow_html=True,
+    <div class="rw-panel-footer">
+      <span class="rw-status-dot {status_class}"></span>
+      <span>{html.escape(status_text)}</span>
+    </div>
+    <div class="rw-map-title">
+      <span>NETWORK VIEW</span>
+      <strong>Active road closures</strong>
+    </div>
+    """
 )
-
-if load_error:
-    st.error(f"The GeoPackage could not be read: {load_error}")
-elif frame is None:
-    st.info("Upload a `.gpkg` file from the **Input file** tab to show closures.")
-else:
-    st.caption(
-        "Click a red closure feature to see its Latitude, Longitude, City, and End date."
-    )
 
 closure_map = build_map(
     frame=frame,
@@ -475,16 +395,22 @@ closure_map = build_map(
 st_folium(
     closure_map,
     width=None,
-    height=690,
+    height=800,
     returned_objects=[],
     key=f"closure-map-{ACTIVE_FILE.stat().st_mtime_ns if ACTIVE_FILE.exists() else 0}",
 )
 
-st.markdown(
-    """
-    <div class="creator-credit">
-      Designed &amp; created by- <strong>Kunal Chhapre</strong>
+st.html(
+    f"""
+    <div class="rw-feature-count">
+      <span class="rw-closure-swatch"></span>
+      <div class="rw-feature-copy">
+        <strong>{metadata["feature_count"]:,}</strong>
+        <span>Closure features</span>
+      </div>
     </div>
-    """,
-    unsafe_allow_html=True,
+    <div class="rw-creator-credit">
+      Designed &amp; created by <strong>Kunal Chhapre</strong>
+    </div>
+    """
 )
