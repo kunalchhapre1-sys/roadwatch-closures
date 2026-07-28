@@ -16,6 +16,8 @@ html,
 body,
 [data-testid="stAppViewContainer"],
 .stApp {
+  height: 100vh;
+  overflow: hidden;
   background: var(--paper);
   color: var(--ink);
   font-family: Arial, Helvetica, sans-serif;
