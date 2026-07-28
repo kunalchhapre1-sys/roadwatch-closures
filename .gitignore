@@ -47,3 +47,4 @@ next-env.d.ts
 /python_app/.venv/
 /python_app/__pycache__/
 /python_app/data/*.gpkg
+/python_app/.streamlit/secrets.toml

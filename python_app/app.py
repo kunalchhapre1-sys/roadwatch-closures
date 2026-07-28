@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import html
 import json
 from datetime import datetime
@@ -13,6 +14,7 @@ import pandas as pd
 import pyogrio
 import streamlit as st
 from branca.element import MacroElement, Template
+from streamlit.errors import StreamlitSecretNotFoundError
 from streamlit_autorefresh import st_autorefresh
 from streamlit_folium import st_folium
 
@@ -46,6 +48,14 @@ def format_size(size: int) -> str:
 def format_modified_time(path: Path) -> str:
     modified_at = datetime.fromtimestamp(path.stat().st_mtime, tz=DISPLAY_TIMEZONE)
     return modified_at.strftime("%d %b %Y, %I:%M %p IST")
+
+
+def get_admin_password() -> str | None:
+    try:
+        password = str(st.secrets["admin_password"])
+    except (KeyError, StreamlitSecretNotFoundError):
+        return None
+    return password if password else None
 
 
 def parse_coordinates(value: str) -> tuple[float, float]:
@@ -277,7 +287,7 @@ with st.sidebar:
         """
     )
 
-    location_tab, upload_tab = st.tabs(["Lat / Long", "Input file"])
+    location_tab, upload_tab = st.tabs(["Lat / Long", "Admin upload"])
     with location_tab:
         st.html(
             """
@@ -321,30 +331,72 @@ with st.sidebar:
             <div class="rw-tool-intro">
               <div class="rw-tool-icon">↑</div>
               <div>
-                <strong>Publish GeoPackage</strong>
-                <span>Uploading replaces the current closure layer.</span>
+                <strong>Restricted upload</strong>
+                <span>Administrator access is required.</span>
               </div>
             </div>
             """
         )
-        uploaded_file = st.file_uploader(
-            "Choose a GeoPackage",
-            type=["gpkg"],
-            help="Maximum file size: 50 MB.",
+        admin_password = get_admin_password()
+        admin_signature = (
+            hashlib.sha256(admin_password.encode("utf-8")).hexdigest()
+            if admin_password is not None
+            else None
         )
-        if uploaded_file is not None:
-            contents = uploaded_file.getvalue()
-            digest = hashlib.sha256(contents).hexdigest()
-            upload_token = f"{getattr(uploaded_file, 'file_id', '')}:{digest}"
-            if st.session_state.get("uploaded_token") != upload_token:
-                if len(contents) > MAX_FILE_SIZE:
-                    st.error("The GeoPackage must be 50 MB or smaller.")
-                else:
-                    ACTIVE_FILE.write_bytes(contents)
-                    st.session_state.uploaded_token = upload_token
-                    st.cache_data.clear()
-                    st.success(f"{uploaded_file.name} is now active.")
+        admin_authenticated = bool(
+            admin_signature
+            and hmac.compare_digest(
+                str(st.session_state.get("admin_signature", "")),
+                admin_signature,
+            )
+        )
+        if admin_authenticated:
+            st.success("Administrator access enabled.")
+            if st.button("Log out", width="stretch"):
+                st.session_state.pop("admin_signature", None)
+                st.rerun()
+
+            uploaded_file = st.file_uploader(
+                "Choose a GeoPackage",
+                type=["gpkg"],
+                help="Maximum file size: 50 MB.",
+            )
+            if uploaded_file is not None:
+                contents = uploaded_file.getvalue()
+                digest = hashlib.sha256(contents).hexdigest()
+                upload_token = f"{getattr(uploaded_file, 'file_id', '')}:{digest}"
+                if st.session_state.get("uploaded_token") != upload_token:
+                    if len(contents) > MAX_FILE_SIZE:
+                        st.error("The GeoPackage must be 50 MB or smaller.")
+                    else:
+                        ACTIVE_FILE.write_bytes(contents)
+                        st.session_state.uploaded_token = upload_token
+                        st.cache_data.clear()
+                        st.success(f"{uploaded_file.name} is now active.")
+                        st.rerun()
+        elif admin_password is None:
+            st.warning(
+                "Admin upload is locked until `admin_password` is configured "
+                "in Streamlit Secrets."
+            )
+        else:
+            with st.form("admin_login", border=False):
+                password_attempt = st.text_input(
+                    "Administrator password",
+                    type="password",
+                    placeholder="Enter your password",
+                )
+                login_submitted = st.form_submit_button(
+                    "Unlock upload",
+                    type="primary",
+                    width="stretch",
+                )
+            if login_submitted:
+                if hmac.compare_digest(password_attempt, admin_password):
+                    st.session_state.admin_signature = admin_signature
                     st.rerun()
+                else:
+                    st.error("Incorrect administrator password.")
         st.html(
             f"""
             <div class="rw-file-card">

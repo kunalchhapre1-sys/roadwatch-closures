@@ -6,7 +6,7 @@ It runs independently from the hosted TypeScript application.
 ## Features
 
 - OpenStreetMap background
-- GeoPackage upload and local file replacement
+- administrator-only GeoPackage upload and local file replacement
 - automatic file refresh every 30 seconds
 - dotted red road-closure symbology
 - combined `Latitude, Longitude` search
@@ -28,9 +28,20 @@ python -m streamlit run app.py
 
 The dashboard opens at `http://localhost:8501`.
 
-## Update the closure layer
+## Configure administrator upload access
 
-Use the **Input file** tab in the dashboard, or replace:
+Create `python_app/.streamlit/secrets.toml` for local use:
+
+```toml
+admin_password = "replace-this-with-a-strong-private-password"
+```
+
+This file is excluded from Git and must never be committed. For Streamlit
+Community Cloud, open the app's **Settings**, select **Secrets**, add the same
+line, and click **Save**.
+
+After signing in through the **Admin upload** tab, upload a GeoPackage to
+replace:
 
 ```text
 python_app/data/current.gpkg
