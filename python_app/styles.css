@@ -342,15 +342,37 @@ footer {
   bottom: 0;
   z-index: 100001;
   width: 390px;
-  min-height: 55px;
+  min-height: 70px;
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 13px 28px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 5px;
+  padding: 10px 28px;
   border-top: 1px solid var(--line);
   background: #fafbfa;
   color: #59635f;
   font-size: 11px;
+}
+
+.rw-footer-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.rw-footer-credit {
+  padding-left: 18px;
+  color: #7b8581;
+  font-size: 9px;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.rw-footer-credit strong {
+  color: #3b4642;
+  font-size: 10px;
+  letter-spacing: .02em;
 }
 
 .rw-status-dot {
@@ -446,32 +468,6 @@ iframe[title="streamlit_folium.st_folium"] {
   text-transform: uppercase;
 }
 
-.rw-creator-credit {
-  position: fixed;
-  right: 14px;
-  bottom: 12px;
-  z-index: 99998;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 10px;
-  border: 1px solid rgba(255, 255, 255, .65);
-  border-radius: 8px;
-  background: rgba(23, 33, 31, .86);
-  box-shadow: 0 5px 18px rgba(18, 34, 29, .18);
-  color: rgba(255, 255, 255, .7);
-  font-size: 9px;
-  letter-spacing: .06em;
-  text-transform: uppercase;
-  backdrop-filter: blur(8px);
-}
-
-.rw-creator-credit strong {
-  color: white;
-  font-size: 10px;
-  letter-spacing: .03em;
-}
-
 @media (max-width: 760px) {
   .rw-topbar {
     height: 66px;
@@ -518,7 +514,7 @@ iframe[title="streamlit_folium.st_folium"] {
   }
 
   .rw-panel-footer {
-    display: none;
+    width: min(390px, 92vw);
   }
 
   .rw-map-title {
@@ -531,8 +527,4 @@ iframe[title="streamlit_folium.st_folium"] {
     bottom: 56px;
   }
 
-  .rw-creator-credit {
-    right: 10px;
-    bottom: 10px;
-  }
 }

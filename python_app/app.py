@@ -376,8 +376,13 @@ st.html(
       </div>
     </div>
     <div class="rw-panel-footer">
-      <span class="rw-status-dot {status_class}"></span>
-      <span>{html.escape(status_text)}</span>
+      <div class="rw-footer-status">
+        <span class="rw-status-dot {status_class}"></span>
+        <span>{html.escape(status_text)}</span>
+      </div>
+      <div class="rw-footer-credit">
+        Designed &amp; created by <strong>Kunal Chhapre</strong>
+      </div>
     </div>
     <div class="rw-map-title">
       <span>NETWORK VIEW</span>
@@ -408,9 +413,6 @@ st.html(
         <strong>{metadata["feature_count"]:,}</strong>
         <span>Closure features</span>
       </div>
-    </div>
-    <div class="rw-creator-credit">
-      Designed &amp; created by <strong>Kunal Chhapre</strong>
     </div>
     """
 )
