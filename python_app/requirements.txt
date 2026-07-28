@@ -1,0 +1,7 @@
+streamlit
+streamlit-folium
+streamlit-autorefresh
+folium
+geopandas
+pyogrio
+shapely
