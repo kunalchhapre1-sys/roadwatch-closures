@@ -25,7 +25,7 @@ DEFAULT_LONGITUDE = 77.75966530609753
 
 
 st.set_page_config(
-    page_title="RoadWatch | Active road closures",
+    page_title="Road Closure Monitor | Active road closures",
     page_icon="🚧",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -366,7 +366,7 @@ st.html(
     <div class="rw-topbar">
       <div class="rw-brand-mark" aria-hidden="true"><span></span></div>
       <div class="rw-brand-copy">
-        <strong>RoadWatch</strong>
+        <strong>Road Closure Monitor</strong>
         <span>Active closure dashboard</span>
       </div>
       <div class="rw-live-chip"><span class="rw-live-dot"></span>LIVE</div>
