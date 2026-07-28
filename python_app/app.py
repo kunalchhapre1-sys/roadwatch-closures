@@ -5,6 +5,7 @@ import html
 import json
 from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import folium
 import geopandas as gpd
@@ -22,6 +23,7 @@ ACTIVE_FILE = DATA_DIR / "current.gpkg"
 MAX_FILE_SIZE = 50 * 1024 * 1024
 DEFAULT_LATITUDE = 12.881703576462842
 DEFAULT_LONGITUDE = 77.75966530609753
+DISPLAY_TIMEZONE = ZoneInfo("Asia/Kolkata")
 
 
 st.set_page_config(
@@ -39,6 +41,11 @@ def format_size(size: int) -> str:
     if size < 1024 * 1024:
         return f"{size / 1024:.1f} KB"
     return f"{size / (1024 * 1024):.1f} MB"
+
+
+def format_modified_time(path: Path) -> str:
+    modified_at = datetime.fromtimestamp(path.stat().st_mtime, tz=DISPLAY_TIMEZONE)
+    return modified_at.strftime("%d %b %Y, %I:%M %p IST")
 
 
 def parse_coordinates(value: str) -> tuple[float, float]:
@@ -254,7 +261,7 @@ if ACTIVE_FILE.exists():
 file_name = ACTIVE_FILE.name if ACTIVE_FILE.exists() else "No file loaded"
 file_size = format_size(ACTIVE_FILE.stat().st_size) if ACTIVE_FILE.exists() else "—"
 updated_time = (
-    datetime.fromtimestamp(ACTIVE_FILE.stat().st_mtime).strftime("%d %b %Y, %I:%M %p")
+    format_modified_time(ACTIVE_FILE)
     if ACTIVE_FILE.exists()
     else "Waiting for upload"
 )
@@ -328,12 +335,13 @@ with st.sidebar:
         if uploaded_file is not None:
             contents = uploaded_file.getvalue()
             digest = hashlib.sha256(contents).hexdigest()
-            if st.session_state.get("uploaded_digest") != digest:
+            upload_token = f"{getattr(uploaded_file, 'file_id', '')}:{digest}"
+            if st.session_state.get("uploaded_token") != upload_token:
                 if len(contents) > MAX_FILE_SIZE:
                     st.error("The GeoPackage must be 50 MB or smaller.")
                 else:
                     ACTIVE_FILE.write_bytes(contents)
-                    st.session_state.uploaded_digest = digest
+                    st.session_state.uploaded_token = upload_token
                     st.cache_data.clear()
                     st.success(f"{uploaded_file.name} is now active.")
                     st.rerun()
