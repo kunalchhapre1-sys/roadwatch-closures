@@ -4,7 +4,8 @@ import hashlib
 import hmac
 import html
 import json
-from datetime import datetime
+import re
+from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -26,6 +27,7 @@ MAX_FILE_SIZE = 50 * 1024 * 1024
 DEFAULT_LATITUDE = 12.881703576462842
 DEFAULT_LONGITUDE = 77.75966530609753
 DISPLAY_TIMEZONE = ZoneInfo("Asia/Kolkata")
+POSTGRES_CACHE_TTL = 25
 
 
 st.set_page_config(
@@ -56,6 +58,28 @@ def get_admin_password() -> str | None:
     except (KeyError, StreamlitSecretNotFoundError):
         return None
     return password if password else None
+
+
+def get_database_settings() -> dict[str, str] | None:
+    try:
+        config = st.secrets["road_closures_database"]
+    except (KeyError, StreamlitSecretNotFoundError):
+        return None
+
+    if not bool(config.get("enabled", False)):
+        return None
+
+    settings = {
+        "schema": str(config.get("schema", "public")),
+        "table": str(config.get("table", "road_closures")),
+        "geometry_column": str(config.get("geometry_column", "geom")),
+    }
+    for label, value in settings.items():
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", value):
+            raise ValueError(
+                f'Invalid PostgreSQL {label.replace("_", " ")}: "{value}".'
+            )
+    return settings
 
 
 def parse_coordinates(value: str) -> tuple[float, float]:
@@ -109,7 +133,6 @@ def filter_by_end_date(
 
 @st.cache_data(show_spinner=False)
 def load_geopackage(path: str, modified_ns: int) -> tuple[gpd.GeoDataFrame, dict]:
-    del modified_ns  # Included only to invalidate the cache after file replacement.
     layer_rows = pyogrio.list_layers(path)
     if len(layer_rows) == 0:
         raise ValueError("This GeoPackage does not contain a feature layer.")
@@ -137,8 +160,55 @@ def load_geopackage(path: str, modified_ns: int) -> tuple[gpd.GeoDataFrame, dict
         crs="EPSG:4326",
     )
     combined = combined[combined.geometry.notna() & ~combined.geometry.is_empty].copy()
-    metadata = {"layers": layer_names, "feature_count": len(combined)}
+    metadata = {
+        "layers": layer_names,
+        "feature_count": len(combined),
+        "source_version": str(modified_ns),
+    }
     return combined, metadata
+
+
+@st.cache_data(
+    ttl=POSTGRES_CACHE_TTL,
+    max_entries=4,
+    show_spinner=False,
+)
+def load_postgis(
+    schema: str,
+    table: str,
+    geometry_column: str,
+) -> tuple[gpd.GeoDataFrame, dict]:
+    connection = st.connection("postgresql", type="sql")
+    quoted_schema = f'"{schema}"'
+    quoted_table = f'"{table}"'
+    quoted_geometry = f'"{geometry_column}"'
+    dashboard_geometry = "__dashboard_geometry"
+    query = f"""
+        SELECT
+            source.*,
+            ST_Transform(source.{quoted_geometry}, 4326) AS "{dashboard_geometry}"
+        FROM {quoted_schema}.{quoted_table} AS source
+        WHERE source.{quoted_geometry} IS NOT NULL
+    """
+    frame = gpd.read_postgis(
+        query,
+        connection.engine,
+        geom_col=dashboard_geometry,
+        crs="EPSG:4326",
+    )
+    frame = frame.drop(columns=[geometry_column], errors="ignore")
+    frame = frame.rename_geometry("geometry")
+    frame = frame[
+        frame.geometry.notna() & ~frame.geometry.is_empty
+    ].copy()
+    synced_at = datetime.now(DISPLAY_TIMEZONE)
+    metadata = {
+        "layers": [f"{schema}.{table}"],
+        "feature_count": len(frame),
+        "source_version": synced_at.isoformat(),
+        "synced_at": synced_at,
+    }
+    return frame, metadata
 
 
 def geojson_data(frame: gpd.GeoDataFrame) -> dict:
@@ -148,7 +218,7 @@ def geojson_data(frame: gpd.GeoDataFrame) -> dict:
             continue
         safe_frame[column] = safe_frame[column].map(
             lambda value: value.isoformat()
-            if isinstance(value, (datetime, pd.Timestamp))
+            if isinstance(value, (date, datetime, pd.Timestamp))
             else value
         )
     return json.loads(safe_frame.to_json(drop_id=True))
@@ -298,9 +368,33 @@ if "date_filter_operator" not in st.session_state:
 
 
 frame: gpd.GeoDataFrame | None = None
-metadata = {"layers": [], "feature_count": 0}
+metadata = {"layers": [], "feature_count": 0, "source_version": "0"}
 load_error: str | None = None
-if ACTIVE_FILE.exists():
+source_warning: str | None = None
+source_mode = "geopackage"
+database_settings: dict[str, str] | None = None
+try:
+    database_settings = get_database_settings()
+except ValueError as error:
+    source_warning = str(error)
+
+if database_settings is not None:
+    try:
+        frame, metadata = load_postgis(
+            database_settings["schema"],
+            database_settings["table"],
+            database_settings["geometry_column"],
+        )
+        source_mode = "postgresql"
+    except Exception:
+        source_warning = (
+            "PostgreSQL could not be read. Check the database secrets, "
+            "network access, table name, and geometry SRID. "
+            "Showing the GeoPackage fallback."
+        )
+        source_mode = "geopackage_fallback"
+
+if frame is None and ACTIVE_FILE.exists():
     try:
         frame, metadata = load_geopackage(
             str(ACTIVE_FILE),
@@ -308,6 +402,9 @@ if ACTIVE_FILE.exists():
         )
     except Exception as error:
         load_error = str(error)
+
+if frame is None and source_warning:
+    load_error = source_warning
 
 end_dates: pd.Series | None = None
 valid_end_dates = pd.Series(dtype="object")
@@ -323,13 +420,27 @@ if "date_filter_date" not in st.session_state:
     )
 
 
-file_name = ACTIVE_FILE.name if ACTIVE_FILE.exists() else "No file loaded"
-file_size = format_size(ACTIVE_FILE.stat().st_size) if ACTIVE_FILE.exists() else "—"
-updated_time = (
-    format_modified_time(ACTIVE_FILE)
-    if ACTIVE_FILE.exists()
-    else "Waiting for upload"
-)
+if source_mode == "postgresql" and database_settings is not None:
+    source_name = (
+        f'{database_settings["schema"]}.{database_settings["table"]}'
+    )
+    source_type = "PostgreSQL / PostGIS"
+    updated_time = metadata["synced_at"].strftime(
+        "%d %b %Y, %I:%M %p IST"
+    )
+    update_label = "Last sync"
+elif ACTIVE_FILE.exists():
+    source_name = ACTIVE_FILE.name
+    if source_mode == "geopackage_fallback":
+        source_name += " (fallback)"
+    source_type = format_size(ACTIVE_FILE.stat().st_size)
+    updated_time = format_modified_time(ACTIVE_FILE)
+    update_label = "Last update"
+else:
+    source_name = "No data source available"
+    source_type = "—"
+    updated_time = "Waiting for data"
+    update_label = "Last update"
 
 with st.sidebar:
     st.html(
@@ -337,7 +448,7 @@ with st.sidebar:
         <div class="rw-panel-heading">
           <p class="rw-eyebrow">Map controls</p>
           <h1>Road closure viewer</h1>
-          <p>Navigate by coordinate or publish the latest closure file for everyone.</p>
+          <p>Navigate by coordinate and explore the latest road closure data.</p>
         </div>
         """
     )
@@ -389,15 +500,15 @@ with st.sidebar:
               <div class="rw-tool-icon">⌑</div>
               <div>
                 <strong>Filter by end date</strong>
-                <span>Uses the GeoPackage endtz column.</span>
+                <span>Uses the active data source endtz column.</span>
               </div>
             </div>
             """
         )
         if frame is None:
-            st.info("Publish a GeoPackage to use the date filter.")
+            st.info("Connect or publish a data source to use the date filter.")
         elif "endtz" not in frame.columns:
-            st.warning("The active GeoPackage does not contain an endtz column.")
+            st.warning("The active data source does not contain an endtz column.")
         elif valid_end_dates.empty:
             st.warning("No valid dates were found in the endtz column.")
         else:
@@ -448,6 +559,15 @@ with st.sidebar:
                     st.rerun()
 
     with upload_tab:
+        if database_settings is not None:
+            if source_mode == "postgresql":
+                st.success("PostgreSQL / PostGIS is connected.")
+            else:
+                st.warning("Database unavailable; GeoPackage fallback is active.")
+            st.info(
+                "Edit attributes in pgAdmin and commit the transaction. "
+                "The dashboard checks for changes every 30 seconds."
+            )
         st.html(
             """
             <div class="rw-tool-intro">
@@ -522,18 +642,26 @@ with st.sidebar:
         st.html(
             f"""
             <div class="rw-file-card">
-              <strong>{html.escape(file_name)}</strong>
-              <span>{file_size} · {updated_time}</span>
+              <strong>{html.escape(source_name)}</strong>
+              <span>{html.escape(source_type)} · {updated_time}</span>
             </div>
             """
         )
-        st.caption(
-            "New files are checked automatically every 30 seconds. "
-            "Cloud deployments require persistent storage for durable uploads."
-        )
+        if database_settings is not None:
+            st.caption(
+                "The upload remains available as an administrator-only "
+                "GeoPackage fallback."
+            )
+        else:
+            st.caption(
+                "New files are checked automatically every 30 seconds. "
+                "Cloud deployments require persistent storage for durable uploads."
+            )
 
-    if load_error:
-        st.error(f"The GeoPackage could not be read: {load_error}")
+    if source_warning:
+        st.warning(source_warning)
+    if load_error and load_error != source_warning:
+        st.error(f"The road closure data could not be read: {load_error}")
 
 
 display_frame = frame
@@ -564,7 +692,7 @@ status_text = (
         else f"{visible_feature_count:,} closure features visible"
     )
     if frame is not None and not load_error
-    else "Waiting for a published GeoPackage"
+    else "Waiting for road closure data"
 )
 status_class = "ready" if frame is not None and not load_error else ""
 
@@ -578,7 +706,7 @@ st.html(
       </div>
       <div class="rw-live-chip"><span class="rw-live-dot"></span>LIVE</div>
       <div class="rw-header-status">
-        <span>Last update</span>
+        <span>{update_label}</span>
         <strong>{updated_time}</strong>
       </div>
     </div>
@@ -617,7 +745,7 @@ st_folium(
     returned_objects=[],
     key=(
         "closure-map-"
-        f"{ACTIVE_FILE.stat().st_mtime_ns if ACTIVE_FILE.exists() else 0}-"
+        f'{metadata.get("source_version", "0")}-'
         f"{map_filter_key}"
     ),
 )

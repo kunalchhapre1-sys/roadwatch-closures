@@ -5,3 +5,5 @@ folium
 geopandas
 pyogrio
 shapely
+sqlalchemy
+psycopg2-binary
