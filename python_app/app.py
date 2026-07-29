@@ -94,18 +94,25 @@ def parse_coordinates(value: str) -> tuple[float, float]:
     return latitude, longitude
 
 
+def parse_end_timestamp(value: object) -> pd.Timestamp | None:
+    if pd.isna(value):
+        return None
+    timestamp = pd.to_datetime(value, errors="coerce")
+    if pd.isna(timestamp):
+        return None
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.tz_localize(DISPLAY_TIMEZONE)
+    else:
+        timestamp = timestamp.tz_convert(DISPLAY_TIMEZONE)
+    return timestamp
+
+
 def parse_end_dates(frame: gpd.GeoDataFrame) -> pd.Series:
     """Return endtz values as local calendar dates, preserving naive dates."""
 
     def parse_value(value: object):
-        if pd.isna(value):
-            return None
-        timestamp = pd.to_datetime(value, errors="coerce")
-        if pd.isna(timestamp):
-            return None
-        if timestamp.tzinfo is not None:
-            timestamp = timestamp.tz_convert(DISPLAY_TIMEZONE)
-        return timestamp.date()
+        timestamp = parse_end_timestamp(value)
+        return timestamp.date() if timestamp is not None else None
 
     return frame["endtz"].map(parse_value)
 
@@ -213,6 +220,14 @@ def load_postgis(
 
 def geojson_data(frame: gpd.GeoDataFrame) -> dict:
     safe_frame = frame.copy()
+    if "endtz" in safe_frame.columns:
+        current_time = pd.Timestamp.now(tz=DISPLAY_TIMEZONE)
+        safe_frame["_dashboard_expired"] = safe_frame["endtz"].map(
+            lambda value: (
+                (timestamp := parse_end_timestamp(value)) is not None
+                and timestamp < current_time
+            )
+        )
     for column in safe_frame.columns:
         if column == safe_frame.geometry.name:
             continue
@@ -289,24 +304,37 @@ def build_map(
         control=True,
     ).add_to(map_object)
     if frame is not None and not frame.empty:
-        layer = folium.GeoJson(
-            data=geojson_data(frame),
-            name="Active road closures",
-            style_function=lambda _feature: {
-                "color": "#e63b2e",
+        def closure_style(feature: dict) -> dict:
+            expired = bool(
+                feature.get("properties", {}).get("_dashboard_expired", False)
+            )
+            color = "#7c8582" if expired else "#e63b2e"
+            return {
+                "color": color,
                 "weight": 5,
-                "opacity": 0.94,
-                "fillColor": "#ef4b3e",
-                "fillOpacity": 0.14,
+                "opacity": 0.82 if expired else 0.94,
+                "fillColor": color,
+                "fillOpacity": 0.10 if expired else 0.14,
                 "dashArray": "1 10",
                 "lineCap": "round",
                 "lineJoin": "round",
-            },
-            highlight_function=lambda _feature: {
-                "color": "#b82017",
+            }
+
+        def closure_highlight_style(feature: dict) -> dict:
+            expired = bool(
+                feature.get("properties", {}).get("_dashboard_expired", False)
+            )
+            return {
+                "color": "#545c59" if expired else "#b82017",
                 "weight": 7,
                 "opacity": 1,
-            },
+            }
+
+        layer = folium.GeoJson(
+            data=geojson_data(frame),
+            name="Active road closures",
+            style_function=closure_style,
+            highlight_function=closure_highlight_style,
             marker=folium.CircleMarker(
                 radius=7,
                 color="#e63b2e",
