@@ -107,6 +107,20 @@ def parse_end_timestamp(value: object) -> pd.Timestamp | None:
     return timestamp
 
 
+def expiration_flags(frame: gpd.GeoDataFrame) -> pd.Series:
+    """Return True for road closures whose end time has passed."""
+    if "endtz" not in frame.columns:
+        return pd.Series(False, index=frame.index, dtype=bool)
+
+    current_time = pd.Timestamp.now(tz=DISPLAY_TIMEZONE)
+    return frame["endtz"].map(
+        lambda value: (
+            (timestamp := parse_end_timestamp(value)) is not None
+            and timestamp < current_time
+        )
+    ).astype(bool)
+
+
 def parse_end_dates(frame: gpd.GeoDataFrame) -> pd.Series:
     """Return endtz values as local calendar dates, preserving naive dates."""
 
@@ -220,14 +234,7 @@ def load_postgis(
 
 def geojson_data(frame: gpd.GeoDataFrame) -> dict:
     safe_frame = frame.copy()
-    if "endtz" in safe_frame.columns:
-        current_time = pd.Timestamp.now(tz=DISPLAY_TIMEZONE)
-        safe_frame["_dashboard_expired"] = safe_frame["endtz"].map(
-            lambda value: (
-                (timestamp := parse_end_timestamp(value)) is not None
-                and timestamp < current_time
-            )
-        )
+    safe_frame["_dashboard_expired"] = expiration_flags(safe_frame)
     for column in safe_frame.columns:
         if column == safe_frame.geometry.name:
             continue
@@ -706,6 +713,12 @@ if (
     )
 
 visible_feature_count = len(display_frame) if display_frame is not None else 0
+inactive_feature_count = (
+    int(expiration_flags(display_frame).sum())
+    if display_frame is not None
+    else 0
+)
+active_feature_count = visible_feature_count - inactive_feature_count
 total_feature_count = metadata["feature_count"]
 date_filter_active = bool(
     frame is not None
@@ -781,10 +794,19 @@ st_folium(
 st.html(
     f"""
     <div class="rw-feature-count">
-      <span class="rw-closure-swatch"></span>
-      <div class="rw-feature-copy">
-        <strong>{visible_feature_count:,}</strong>
-        <span>{"Filtered features" if date_filter_active else "Closure features"}</span>
+      <div class="rw-feature-row">
+        <span class="rw-closure-swatch active" aria-hidden="true"></span>
+        <div class="rw-feature-copy">
+          <strong>{active_feature_count:,}</strong>
+          <span>Active road closures</span>
+        </div>
+      </div>
+      <div class="rw-feature-row">
+        <span class="rw-closure-swatch inactive" aria-hidden="true"></span>
+        <div class="rw-feature-copy">
+          <strong>{inactive_feature_count:,}</strong>
+          <span>Inactive road closures</span>
+        </div>
       </div>
     </div>
     """
