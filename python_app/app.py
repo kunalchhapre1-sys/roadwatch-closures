@@ -70,6 +70,43 @@ def parse_coordinates(value: str) -> tuple[float, float]:
     return latitude, longitude
 
 
+def parse_end_dates(frame: gpd.GeoDataFrame) -> pd.Series:
+    """Return endtz values as local calendar dates, preserving naive dates."""
+
+    def parse_value(value: object):
+        if pd.isna(value):
+            return None
+        timestamp = pd.to_datetime(value, errors="coerce")
+        if pd.isna(timestamp):
+            return None
+        if timestamp.tzinfo is not None:
+            timestamp = timestamp.tz_convert(DISPLAY_TIMEZONE)
+        return timestamp.date()
+
+    return frame["endtz"].map(parse_value)
+
+
+def filter_by_end_date(
+    frame: gpd.GeoDataFrame,
+    end_dates: pd.Series,
+    operator: str,
+    selected_date,
+) -> gpd.GeoDataFrame:
+    if operator == "<=":
+        mask = end_dates.map(
+            lambda value: value is not None and value <= selected_date
+        )
+    elif operator == ">=":
+        mask = end_dates.map(
+            lambda value: value is not None and value >= selected_date
+        )
+    else:
+        mask = end_dates.map(
+            lambda value: value is not None and value == selected_date
+        )
+    return frame.loc[mask].copy()
+
+
 @st.cache_data(show_spinner=False)
 def load_geopackage(path: str, modified_ns: int) -> tuple[gpd.GeoDataFrame, dict]:
     del modified_ns  # Included only to invalidate the cache after file replacement.
@@ -254,6 +291,10 @@ if "target_longitude" not in st.session_state:
     st.session_state.target_longitude = DEFAULT_LONGITUDE
 if "target_selected" not in st.session_state:
     st.session_state.target_selected = False
+if "date_filter_active" not in st.session_state:
+    st.session_state.date_filter_active = False
+if "date_filter_operator" not in st.session_state:
+    st.session_state.date_filter_operator = "="
 
 
 frame: gpd.GeoDataFrame | None = None
@@ -267,6 +308,19 @@ if ACTIVE_FILE.exists():
         )
     except Exception as error:
         load_error = str(error)
+
+end_dates: pd.Series | None = None
+valid_end_dates = pd.Series(dtype="object")
+if frame is not None and "endtz" in frame.columns:
+    end_dates = parse_end_dates(frame)
+    valid_end_dates = end_dates.dropna()
+
+if "date_filter_date" not in st.session_state:
+    st.session_state.date_filter_date = (
+        valid_end_dates.min()
+        if not valid_end_dates.empty
+        else datetime.now(DISPLAY_TIMEZONE).date()
+    )
 
 
 file_name = ACTIVE_FILE.name if ACTIVE_FILE.exists() else "No file loaded"
@@ -288,7 +342,9 @@ with st.sidebar:
         """
     )
 
-    location_tab, upload_tab = st.tabs(["Lat / Long", "Admin upload"])
+    location_tab, date_filter_tab, upload_tab = st.tabs(
+        ["Lat / Long", "Date filter", "Admin upload"]
+    )
     with location_tab:
         st.html(
             """
@@ -325,6 +381,71 @@ with st.sidebar:
             </div>
             """
         )
+
+    with date_filter_tab:
+        st.html(
+            """
+            <div class="rw-tool-intro">
+              <div class="rw-tool-icon">⌑</div>
+              <div>
+                <strong>Filter by end date</strong>
+                <span>Uses the GeoPackage endtz column.</span>
+              </div>
+            </div>
+            """
+        )
+        if frame is None:
+            st.info("Publish a GeoPackage to use the date filter.")
+        elif "endtz" not in frame.columns:
+            st.warning("The active GeoPackage does not contain an endtz column.")
+        elif valid_end_dates.empty:
+            st.warning("No valid dates were found in the endtz column.")
+        else:
+            with st.form("date_filter_form", border=False):
+                st.selectbox(
+                    "Condition",
+                    options=["=", "<=", ">="],
+                    format_func={
+                        "=": "= Exact date",
+                        "<=": "≤ On or before",
+                        ">=": "≥ On or after",
+                    }.get,
+                    key="date_filter_operator",
+                )
+                st.date_input("End date", key="date_filter_date")
+                filter_submitted = st.form_submit_button(
+                    "Apply filter",
+                    type="primary",
+                    width="stretch",
+                )
+
+            if filter_submitted:
+                st.session_state.date_filter_active = True
+
+            if st.session_state.date_filter_active:
+                operator_labels = {
+                    "=": "equal to",
+                    "<=": "on or before",
+                    ">=": "on or after",
+                }
+                active_operator = st.session_state.date_filter_operator
+                active_date = st.session_state.date_filter_date
+                st.html(
+                    f"""
+                    <div class="rw-filter-card">
+                      <span>Active filter</span>
+                      <strong>End date {operator_labels[active_operator]}
+                      {active_date.strftime("%d %b %Y")}</strong>
+                    </div>
+                    """
+                )
+                if st.button(
+                    "Clear date filter",
+                    width="stretch",
+                    key="clear_date_filter",
+                ):
+                    st.session_state.date_filter_active = False
+                    st.rerun()
 
     with upload_tab:
         st.html(
@@ -415,8 +536,33 @@ with st.sidebar:
         st.error(f"The GeoPackage could not be read: {load_error}")
 
 
+display_frame = frame
+if (
+    frame is not None
+    and end_dates is not None
+    and st.session_state.date_filter_active
+):
+    display_frame = filter_by_end_date(
+        frame,
+        end_dates,
+        st.session_state.date_filter_operator,
+        st.session_state.date_filter_date,
+    )
+
+visible_feature_count = len(display_frame) if display_frame is not None else 0
+total_feature_count = metadata["feature_count"]
+date_filter_active = bool(
+    frame is not None
+    and end_dates is not None
+    and st.session_state.date_filter_active
+)
 status_text = (
-    f'{metadata["feature_count"]:,} closure features visible'
+    (
+        f"{visible_feature_count:,} of {total_feature_count:,} "
+        "closure features visible"
+        if date_filter_active
+        else f"{visible_feature_count:,} closure features visible"
+    )
     if frame is not None and not load_error
     else "Waiting for a published GeoPackage"
 )
@@ -453,17 +599,27 @@ st.html(
 )
 
 closure_map = build_map(
-    frame=frame,
+    frame=display_frame,
     latitude=st.session_state.target_latitude,
     longitude=st.session_state.target_longitude,
     target_selected=st.session_state.target_selected,
+)
+map_filter_key = (
+    f"{st.session_state.date_filter_operator}-"
+    f"{st.session_state.date_filter_date.isoformat()}"
+    if date_filter_active
+    else "all"
 )
 st_folium(
     closure_map,
     width=None,
     height=800,
     returned_objects=[],
-    key=f"closure-map-{ACTIVE_FILE.stat().st_mtime_ns if ACTIVE_FILE.exists() else 0}",
+    key=(
+        "closure-map-"
+        f"{ACTIVE_FILE.stat().st_mtime_ns if ACTIVE_FILE.exists() else 0}-"
+        f"{map_filter_key}"
+    ),
 )
 
 st.html(
@@ -471,8 +627,8 @@ st.html(
     <div class="rw-feature-count">
       <span class="rw-closure-swatch"></span>
       <div class="rw-feature-copy">
-        <strong>{metadata["feature_count"]:,}</strong>
-        <span>Closure features</span>
+        <strong>{visible_feature_count:,}</strong>
+        <span>{"Filtered features" if date_filter_active else "Closure features"}</span>
       </div>
     </div>
     """

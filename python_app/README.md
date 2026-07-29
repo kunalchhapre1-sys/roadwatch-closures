@@ -10,6 +10,7 @@ It runs independently from the hosted TypeScript application.
 - automatic file refresh every 30 seconds
 - dotted red road-closure symbology
 - combined `Latitude, Longitude` search
+- `endtz` date filtering with `=`, `<=`, and `>=` conditions
 - clicked feature coordinates
 - `city` and `endtz` attribute display
 - multiple feature layers from one GeoPackage

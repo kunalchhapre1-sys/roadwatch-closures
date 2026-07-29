@@ -254,6 +254,8 @@ footer {
 }
 
 [data-testid="stSidebar"] .stTextInput label p,
+[data-testid="stSidebar"] .stSelectbox label p,
+[data-testid="stSidebar"] .stDateInput label p,
 [data-testid="stSidebar"] .stFileUploader label p {
   color: #3e4946;
   font-size: 11px;
@@ -262,7 +264,8 @@ footer {
   text-transform: uppercase;
 }
 
-[data-testid="stSidebar"] .stTextInput input {
+[data-testid="stSidebar"] .stTextInput input,
+[data-testid="stSidebar"] .stDateInput input {
   height: 45px;
   border-color: #ccd5d1;
   border-radius: 9px;
@@ -299,6 +302,7 @@ footer {
 }
 
 .rw-coordinate-card,
+.rw-filter-card,
 .rw-file-card {
   margin-top: 17px;
   padding: 12px 13px;
@@ -314,10 +318,19 @@ footer {
   gap: 10px;
 }
 
+.rw-filter-card span,
 .rw-coordinate-card span,
 .rw-file-card span {
   color: var(--muted);
   font-size: 11px;
+}
+
+.rw-filter-card strong {
+  display: block;
+  margin-top: 5px;
+  color: var(--green-dark);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .rw-coordinate-card strong {
