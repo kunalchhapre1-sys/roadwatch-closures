@@ -213,12 +213,7 @@ def load_city_boundaries(path: str, modified_ns: int) -> gpd.GeoDataFrame:
     if boundaries.empty:
         raise ValueError("The city boundary layer has no polygon features.")
 
-    visible_columns = [
-        column
-        for column in ("CITY_NME", "STT_NME")
-        if column in boundaries.columns
-    ]
-    return boundaries[visible_columns + [boundaries.geometry.name]]
+    return boundaries[[boundaries.geometry.name]]
 
 
 @st.cache_data(
@@ -345,18 +340,6 @@ def build_map(
     ).add_to(map_object)
 
     if city_boundaries is not None and not city_boundaries.empty:
-        tooltip_fields = [
-            field for field in ("CITY_NME", "STT_NME")
-            if field in city_boundaries.columns
-        ]
-        tooltip_aliases = [
-            alias
-            for field, alias in (
-                ("CITY_NME", "City:"),
-                ("STT_NME", "State:"),
-            )
-            if field in city_boundaries.columns
-        ]
         folium.GeoJson(
             data=json.loads(city_boundaries.to_json(drop_id=True)),
             name="City boundaries",
@@ -373,15 +356,6 @@ def build_map(
                 "opacity": 1,
                 "fillOpacity": 0.07,
             },
-            tooltip=(
-                folium.GeoJsonTooltip(
-                    fields=tooltip_fields,
-                    aliases=tooltip_aliases,
-                    sticky=False,
-                )
-                if tooltip_fields
-                else None
-            ),
         ).add_to(map_object)
 
     if frame is not None and not frame.empty:
