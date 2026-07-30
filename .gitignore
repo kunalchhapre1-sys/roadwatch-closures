@@ -47,4 +47,5 @@ next-env.d.ts
 /python_app/.venv/
 /python_app/__pycache__/
 /python_app/data/*.gpkg
+!/python_app/data/T7_merged_city_boundary.gpkg
 /python_app/.streamlit/secrets.toml

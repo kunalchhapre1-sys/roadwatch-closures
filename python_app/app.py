@@ -23,6 +23,7 @@ from streamlit_folium import st_folium
 APP_DIR = Path(__file__).resolve().parent
 DATA_DIR = APP_DIR / "data"
 ACTIVE_FILE = DATA_DIR / "current.gpkg"
+CITY_BOUNDARY_FILE = DATA_DIR / "T7_merged_city_boundary.gpkg"
 MAX_FILE_SIZE = 50 * 1024 * 1024
 DEFAULT_LATITUDE = 12.881703576462842
 DEFAULT_LONGITUDE = 77.75966530609753
@@ -189,6 +190,37 @@ def load_geopackage(path: str, modified_ns: int) -> tuple[gpd.GeoDataFrame, dict
     return combined, metadata
 
 
+@st.cache_data(show_spinner=False)
+def load_city_boundaries(path: str, modified_ns: int) -> gpd.GeoDataFrame:
+    layer_rows = pyogrio.list_layers(path)
+    if len(layer_rows) == 0:
+        raise ValueError("The city boundary GeoPackage does not contain a layer.")
+
+    layer_name = str(layer_rows[0][0])
+    boundaries = gpd.read_file(path, layer=layer_name, engine="pyogrio")
+    if boundaries.empty:
+        raise ValueError("The city boundary layer is empty.")
+    if boundaries.crs is None:
+        raise ValueError("The city boundary layer has no coordinate reference system.")
+
+    boundaries = boundaries.to_crs(epsg=4326)
+    boundaries = boundaries[
+        boundaries.geometry.notna() & ~boundaries.geometry.is_empty
+    ].copy()
+    boundaries = boundaries[
+        boundaries.geometry.geom_type.isin(["Polygon", "MultiPolygon"])
+    ].copy()
+    if boundaries.empty:
+        raise ValueError("The city boundary layer has no polygon features.")
+
+    visible_columns = [
+        column
+        for column in ("CITY_NME", "STT_NME")
+        if column in boundaries.columns
+    ]
+    return boundaries[visible_columns + [boundaries.geometry.name]]
+
+
 @st.cache_data(
     ttl=POSTGRES_CACHE_TTL,
     max_entries=4,
@@ -291,6 +323,7 @@ def add_feature_click_popup(
 
 def build_map(
     frame: gpd.GeoDataFrame | None,
+    city_boundaries: gpd.GeoDataFrame | None,
     latitude: float,
     longitude: float,
     target_selected: bool,
@@ -310,6 +343,48 @@ def build_map(
         overlay=False,
         control=True,
     ).add_to(map_object)
+
+    if city_boundaries is not None and not city_boundaries.empty:
+        tooltip_fields = [
+            field for field in ("CITY_NME", "STT_NME")
+            if field in city_boundaries.columns
+        ]
+        tooltip_aliases = [
+            alias
+            for field, alias in (
+                ("CITY_NME", "City:"),
+                ("STT_NME", "State:"),
+            )
+            if field in city_boundaries.columns
+        ]
+        folium.GeoJson(
+            data=json.loads(city_boundaries.to_json(drop_id=True)),
+            name="City boundaries",
+            style_function=lambda _feature: {
+                "color": "#176b5b",
+                "weight": 2.5,
+                "opacity": 0.9,
+                "fillColor": "#176b5b",
+                "fillOpacity": 0.035,
+                "dashArray": "7 5",
+            },
+            highlight_function=lambda _feature: {
+                "color": "#0d4f43",
+                "weight": 4,
+                "opacity": 1,
+                "fillOpacity": 0.07,
+            },
+            tooltip=(
+                folium.GeoJsonTooltip(
+                    fields=tooltip_fields,
+                    aliases=tooltip_aliases,
+                    sticky=False,
+                )
+                if tooltip_fields
+                else None
+            ),
+        ).add_to(map_object)
+
     if frame is not None and not frame.empty:
         def closure_style(feature: dict) -> dict:
             expired = bool(
@@ -362,11 +437,16 @@ def build_map(
         )
         layer.add_to(map_object)
         add_feature_click_popup(map_object, layer)
-        folium.LayerControl(collapsed=True).add_to(map_object)
 
         if not target_selected:
             min_x, min_y, max_x, max_y = frame.total_bounds
             map_object.fit_bounds([[min_y, min_x], [max_y, max_x]], padding=(28, 28))
+
+    if (
+        (city_boundaries is not None and not city_boundaries.empty)
+        or (frame is not None and not frame.empty)
+    ):
+        folium.LayerControl(collapsed=True).add_to(map_object)
 
     if target_selected:
         folium.CircleMarker(
@@ -407,6 +487,9 @@ metadata = {"layers": [], "feature_count": 0, "source_version": "0"}
 load_error: str | None = None
 source_warning: str | None = None
 source_mode = "geopackage"
+city_boundaries: gpd.GeoDataFrame | None = None
+city_boundary_error: str | None = None
+city_boundary_version = "missing"
 database_settings: dict[str, str] | None = None
 try:
     database_settings = get_database_settings()
@@ -440,6 +523,16 @@ if frame is None and ACTIVE_FILE.exists():
 
 if frame is None and source_warning:
     load_error = source_warning
+
+if CITY_BOUNDARY_FILE.exists():
+    try:
+        city_boundary_version = str(CITY_BOUNDARY_FILE.stat().st_mtime_ns)
+        city_boundaries = load_city_boundaries(
+            str(CITY_BOUNDARY_FILE),
+            CITY_BOUNDARY_FILE.stat().st_mtime_ns,
+        )
+    except Exception as error:
+        city_boundary_error = str(error)
 
 end_dates: pd.Series | None = None
 valid_end_dates = pd.Series(dtype="object")
@@ -697,6 +790,10 @@ with st.sidebar:
         st.warning(source_warning)
     if load_error and load_error != source_warning:
         st.error(f"The road closure data could not be read: {load_error}")
+    if city_boundary_error:
+        st.warning(
+            f"The city boundary layer could not be read: {city_boundary_error}"
+        )
 
 
 display_frame = frame
@@ -769,6 +866,7 @@ st.html(
 
 closure_map = build_map(
     frame=display_frame,
+    city_boundaries=city_boundaries,
     latitude=st.session_state.target_latitude,
     longitude=st.session_state.target_longitude,
     target_selected=st.session_state.target_selected,
@@ -787,6 +885,7 @@ st_folium(
     key=(
         "closure-map-"
         f'{metadata.get("source_version", "0")}-'
+        f"{city_boundary_version}-"
         f"{map_filter_key}"
     ),
 )
