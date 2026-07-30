@@ -366,7 +366,6 @@ def build_map(
                 "opacity": 0.9,
                 "fillColor": "#176b5b",
                 "fillOpacity": 0.035,
-                "dashArray": "7 5",
             },
             highlight_function=lambda _feature: {
                 "color": "#0d4f43",
