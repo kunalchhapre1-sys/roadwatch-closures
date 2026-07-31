@@ -28,8 +28,9 @@ MAX_FILE_SIZE = 50 * 1024 * 1024
 DEFAULT_LATITUDE = 12.881703576462842
 DEFAULT_LONGITUDE = 77.75966530609753
 DISPLAY_TIMEZONE = ZoneInfo("Asia/Kolkata")
-REFRESH_INTERVAL_SECONDS = 10
-POSTGRES_CACHE_TTL = 8
+REFRESH_INTERVAL_SECONDS = 15 * 60
+REFRESH_INTERVAL_LABEL = "15 minutes"
+POSTGRES_CACHE_TTL = 14 * 60
 
 
 st.set_page_config(
@@ -672,7 +673,7 @@ with st.sidebar:
             st.info(
                 "Edit attributes in pgAdmin and commit the transaction. "
                 f"The dashboard checks for changes every "
-                f"{REFRESH_INTERVAL_SECONDS} seconds."
+                f"{REFRESH_INTERVAL_LABEL}."
             )
         st.html(
             """
@@ -761,7 +762,7 @@ with st.sidebar:
         else:
             st.caption(
                 f"New files are checked automatically every "
-                f"{REFRESH_INTERVAL_SECONDS} seconds. "
+                f"{REFRESH_INTERVAL_LABEL}. "
                 "Cloud deployments require persistent storage for durable uploads."
             )
 
