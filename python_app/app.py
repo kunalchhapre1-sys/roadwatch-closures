@@ -28,7 +28,8 @@ MAX_FILE_SIZE = 50 * 1024 * 1024
 DEFAULT_LATITUDE = 12.881703576462842
 DEFAULT_LONGITUDE = 77.75966530609753
 DISPLAY_TIMEZONE = ZoneInfo("Asia/Kolkata")
-POSTGRES_CACHE_TTL = 25
+REFRESH_INTERVAL_SECONDS = 10
+POSTGRES_CACHE_TTL = 8
 
 
 st.set_page_config(
@@ -437,7 +438,10 @@ def build_map(
 
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
-st_autorefresh(interval=30_000, key="roadwatch-file-watch")
+st_autorefresh(
+    interval=REFRESH_INTERVAL_SECONDS * 1_000,
+    key="roadwatch-file-watch",
+)
 
 if "coordinate_text" not in st.session_state:
     st.session_state.coordinate_text = (
@@ -667,7 +671,8 @@ with st.sidebar:
                 st.warning("Database unavailable; GeoPackage fallback is active.")
             st.info(
                 "Edit attributes in pgAdmin and commit the transaction. "
-                "The dashboard checks for changes every 30 seconds."
+                f"The dashboard checks for changes every "
+                f"{REFRESH_INTERVAL_SECONDS} seconds."
             )
         st.html(
             """
@@ -755,7 +760,8 @@ with st.sidebar:
             )
         else:
             st.caption(
-                "New files are checked automatically every 30 seconds. "
+                f"New files are checked automatically every "
+                f"{REFRESH_INTERVAL_SECONDS} seconds. "
                 "Cloud deployments require persistent storage for durable uploads."
             )
 
