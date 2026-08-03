@@ -3,6 +3,7 @@ streamlit-folium
 streamlit-autorefresh
 folium
 geopandas
+gspread
 pyogrio
 shapely
 sqlalchemy

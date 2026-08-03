@@ -5,6 +5,7 @@ import hmac
 import html
 import json
 import re
+import uuid
 from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -31,6 +32,29 @@ DISPLAY_TIMEZONE = ZoneInfo("Asia/Kolkata")
 REFRESH_INTERVAL_SECONDS = 15 * 60
 REFRESH_INTERVAL_LABEL = "15 minutes"
 POSTGRES_CACHE_TTL = 14 * 60
+
+
+class DraggableMarkerBridge(MacroElement):
+    """Send a Leaflet marker's final drag position back through st_folium."""
+
+    _template = Template(
+        """
+        {% macro script(this, kwargs) %}
+        {{ this.marker_name }}.on('dragend', function(event) {
+            {{ this.map_name }}.fire('draw:created', {
+                layer: event.target,
+                layerType: 'marker'
+            });
+        });
+        {% endmacro %}
+        """
+    )
+
+    def __init__(self, marker: folium.Marker, map_object: folium.Map):
+        super().__init__()
+        self._name = "DraggableMarkerBridge"
+        self.marker_name = marker.get_name()
+        self.map_name = map_object.get_name()
 
 
 st.set_page_config(
@@ -83,6 +107,248 @@ def get_database_settings() -> dict[str, str] | None:
                 f'Invalid PostgreSQL {label.replace("_", " ")}: "{value}".'
             )
     return settings
+
+
+def get_google_sheets_settings() -> dict | None:
+    """Return Google Sheets settings when submissions are explicitly enabled."""
+    try:
+        config = st.secrets["google_sheets"]
+        credentials = st.secrets["google_service_account"]
+    except (KeyError, StreamlitSecretNotFoundError):
+        return None
+
+    if not bool(config.get("enabled", False)):
+        return None
+
+    spreadsheet_id = str(config.get("spreadsheet_id", "")).strip()
+    worksheet = str(config.get("worksheet", "Road closure reports")).strip()
+    if not spreadsheet_id or not worksheet:
+        raise ValueError(
+            "Google Sheets is enabled, but spreadsheet_id or worksheet is missing."
+        )
+
+    return {
+        "spreadsheet_id": spreadsheet_id,
+        "worksheet": worksheet,
+        "credentials": dict(credentials),
+    }
+
+
+def append_report_to_google_sheet(settings: dict, report: dict[str, str]) -> None:
+    """Append one public report without changing the production database."""
+    import gspread
+
+    client = gspread.service_account_from_dict(settings["credentials"])
+    spreadsheet = client.open_by_key(settings["spreadsheet_id"])
+    try:
+        worksheet = spreadsheet.worksheet(settings["worksheet"])
+    except gspread.WorksheetNotFound:
+        worksheet = spreadsheet.add_worksheet(
+            title=settings["worksheet"], rows=1000, cols=len(report)
+        )
+
+    headers = list(report.keys())
+    if not worksheet.row_values(1):
+        worksheet.append_row(headers, value_input_option="RAW")
+    worksheet.append_row(list(report.values()), value_input_option="RAW")
+
+
+def city_for_coordinate(
+    city_boundaries: gpd.GeoDataFrame | None,
+    latitude: float,
+    longitude: float,
+) -> str:
+    """Return the local boundary's city name for a WGS84 coordinate."""
+    if (
+        city_boundaries is None
+        or city_boundaries.empty
+        or "CITY_NME" not in city_boundaries.columns
+    ):
+        return ""
+
+    point = gpd.points_from_xy([longitude], [latitude], crs="EPSG:4326")[0]
+    matches = city_boundaries.loc[city_boundaries.geometry.covers(point)]
+    if matches.empty:
+        return ""
+    return str(matches.iloc[0]["CITY_NME"]).strip()
+
+
+def render_road_closure_report_form(
+    google_sheets_settings: dict | None,
+    city_boundaries: gpd.GeoDataFrame | None,
+) -> None:
+    """Render the public report form and its latest-submission preview."""
+    st.html(
+        """
+        <div class="rw-tool-intro">
+          <div class="rw-tool-icon">+</div>
+          <div>
+            <strong>Report a road closure</strong>
+            <span>Send an observation for administrator review.</span>
+          </div>
+        </div>
+        """
+    )
+    if google_sheets_settings is None:
+        st.info("Preview mode: submissions are displayed below but are not saved.")
+    else:
+        st.success("Submissions are saved to the review Google Sheet.")
+
+    detected_city = city_for_coordinate(
+        city_boundaries,
+        st.session_state.report_latitude,
+        st.session_state.report_longitude,
+    )
+    if not st.session_state.report_city and detected_city:
+        st.session_state.report_city = detected_city
+
+    st.text_input(
+        "Latitude, Longitude",
+        key="report_coordinate_text",
+        placeholder=f"{DEFAULT_LATITUDE}, {DEFAULT_LONGITUDE}",
+    )
+    go_column, pin_column = st.columns(2, gap="xsmall")
+    with go_column:
+        go_to_location = st.button(
+            "Go to location",
+            type="primary",
+            width="stretch",
+            key="report_go_to_location",
+        )
+    with pin_column:
+        pin_clicked = st.button(
+            "Pin",
+            icon=":material/location_on:",
+            type="secondary",
+            help="Show or hide the movable pin on the main map.",
+            width="stretch",
+            key="report_pin_toggle",
+        )
+
+    if go_to_location:
+        try:
+            report_latitude, report_longitude = parse_coordinates(
+                st.session_state.report_coordinate_text
+            )
+            st.session_state.report_latitude = report_latitude
+            st.session_state.report_longitude = report_longitude
+            st.session_state.report_city = city_for_coordinate(
+                city_boundaries,
+                report_latitude,
+                report_longitude,
+            )
+            st.session_state.report_pin_active = True
+            st.rerun()
+        except ValueError as error:
+            st.error(str(error))
+
+    if pin_clicked:
+        st.session_state.report_pin_active = not st.session_state.report_pin_active
+        st.rerun()
+
+    if st.session_state.report_pin_active:
+        st.info("Drag the red pin on the large map, then release it at the location.")
+        st.caption(
+            "Selected: "
+            f"{st.session_state.report_latitude:.8f}, "
+            f"{st.session_state.report_longitude:.8f}"
+        )
+
+    now = datetime.now(DISPLAY_TIMEZONE)
+    with st.form("road_closure_report_form", border=False):
+        reporter_name = st.text_input("Reporter name", placeholder="Your full name")
+        employee_id = st.text_input("Employee ID", placeholder="Optional")
+        city = st.text_input(
+            "City",
+            key="report_city",
+            placeholder="Filled automatically from the selected pin",
+        )
+        closure_type = st.selectbox(
+            "Closure type",
+            ["Full closure", "Partial closure", "Lane closure", "Other"],
+        )
+        observed_date = st.date_input("Observed date", value=now.date())
+        observed_time = st.time_input(
+            "Observed time", value=now.time().replace(second=0, microsecond=0)
+        )
+        expected_end = st.text_input(
+            "Expected end date/time",
+            placeholder="Optional, for example 05 Aug 2026, 06:00 PM",
+        )
+        reason = st.text_input(
+            "Reason", placeholder="Construction, event, flooding, etc."
+        )
+        notes = st.text_area(
+            "Additional details",
+            placeholder="Describe the closure and any diversion information.",
+        )
+        evidence_link = st.text_input(
+            "Photo or evidence link",
+            placeholder="Optional Google Drive or approved shared link",
+        )
+        report_submitted = st.form_submit_button(
+            "Submit for review",
+            type="primary",
+            width="stretch",
+            icon=":material/send:",
+        )
+
+    if report_submitted:
+        if not reporter_name.strip() or not city.strip():
+            st.error("Reporter name and city are required.")
+        else:
+            observed_at = datetime.combine(
+                observed_date, observed_time, tzinfo=DISPLAY_TIMEZONE
+            )
+            submitted_at = datetime.now(DISPLAY_TIMEZONE)
+            report = {
+                "report_id": (
+                    f"RC-{submitted_at.strftime('%Y%m%d-%H%M%S')}-"
+                    f"{uuid.uuid4().hex[:4].upper()}"
+                ),
+                "status": "Pending",
+                "submitted_at": submitted_at.isoformat(timespec="seconds"),
+                "reporter_name": reporter_name.strip(),
+                "employee_id": employee_id.strip(),
+                "city": city.strip(),
+                "location": (
+                    f"{st.session_state.report_latitude:.8f}, "
+                    f"{st.session_state.report_longitude:.8f}"
+                ),
+                "latitude": f"{st.session_state.report_latitude:.8f}",
+                "longitude": f"{st.session_state.report_longitude:.8f}",
+                "closure_type": closure_type,
+                "observed_at": observed_at.isoformat(timespec="minutes"),
+                "expected_end": expected_end.strip(),
+                "reason": reason.strip(),
+                "notes": notes.strip(),
+                "evidence_link": evidence_link.strip(),
+            }
+            st.session_state.report_preview = report
+            if google_sheets_settings is None:
+                st.success("Preview created. Nothing was saved or sent.")
+            else:
+                try:
+                    append_report_to_google_sheet(google_sheets_settings, report)
+                    st.success(
+                        f"Report {report['report_id']} was submitted for review."
+                    )
+                except Exception:
+                    st.error(
+                        "The report could not be saved to Google Sheets. "
+                        "Check the Sheet sharing and Streamlit secrets."
+                    )
+
+    if st.session_state.report_preview:
+        report = st.session_state.report_preview
+        with st.container(border=True):
+            st.caption("Latest submission preview")
+            st.write(f"**{report['report_id']} · {report['status']}**")
+            st.write(report["city"])
+            st.code(f"{report['latitude']}, {report['longitude']}")
+            st.caption(
+                f"{report['closure_type']} · Observed {report['observed_at']}"
+            )
 
 
 def parse_coordinates(value: str) -> tuple[float, float]:
@@ -215,7 +481,12 @@ def load_city_boundaries(path: str, modified_ns: int) -> gpd.GeoDataFrame:
     if boundaries.empty:
         raise ValueError("The city boundary layer has no polygon features.")
 
-    return boundaries[[boundaries.geometry.name]]
+    keep_columns = [
+        column
+        for column in ("CITY_NME", "STT_NME", boundaries.geometry.name)
+        if column in boundaries.columns
+    ]
+    return boundaries[keep_columns]
 
 
 @st.cache_data(
@@ -324,10 +595,11 @@ def build_map(
     latitude: float,
     longitude: float,
     target_selected: bool,
+    report_pin_active: bool,
 ) -> folium.Map:
     map_object = folium.Map(
         location=[latitude, longitude],
-        zoom_start=15 if target_selected else 14,
+        zoom_start=17 if report_pin_active else (15 if target_selected else 14),
         tiles=None,
         control_scale=True,
         prefer_canvas=True,
@@ -342,8 +614,9 @@ def build_map(
     ).add_to(map_object)
 
     if city_boundaries is not None and not city_boundaries.empty:
+        boundary_geometry = city_boundaries[[city_boundaries.geometry.name]]
         folium.GeoJson(
-            data=json.loads(city_boundaries.to_json(drop_id=True)),
+            data=json.loads(boundary_geometry.to_json(drop_id=True)),
             name="City boundaries",
             style_function=lambda _feature: {
                 "color": "#176b5b",
@@ -413,7 +686,7 @@ def build_map(
         layer.add_to(map_object)
         add_feature_click_popup(map_object, layer)
 
-        if not target_selected:
+        if not target_selected and not report_pin_active:
             min_x, min_y, max_x, max_y = frame.total_bounds
             map_object.fit_bounds([[min_y, min_x], [max_y, max_x]], padding=(28, 28))
 
@@ -423,7 +696,7 @@ def build_map(
     ):
         folium.LayerControl(collapsed=True).add_to(map_object)
 
-    if target_selected:
+    if target_selected and not report_pin_active:
         folium.CircleMarker(
             location=[latitude, longitude],
             radius=9,
@@ -434,6 +707,18 @@ def build_map(
             fill_opacity=1,
             tooltip=f"{latitude}, {longitude}",
         ).add_to(map_object)
+
+    if report_pin_active:
+        report_marker = folium.Marker(
+            location=[latitude, longitude],
+            tooltip="Drag this pin to the exact road-closure location",
+            icon=folium.Icon(color="red", icon="map-marker", prefix="fa"),
+            draggable=True,
+            auto_pan=True,
+            z_index_offset=2000,
+        )
+        report_marker.add_to(map_object)
+        DraggableMarkerBridge(report_marker, map_object).add_to(map_object)
 
     return map_object
 
@@ -458,6 +743,22 @@ if "date_filter_active" not in st.session_state:
     st.session_state.date_filter_active = False
 if "date_filter_operator" not in st.session_state:
     st.session_state.date_filter_operator = "="
+if "report_preview" not in st.session_state:
+    st.session_state.report_preview = None
+if "report_pin_active" not in st.session_state:
+    st.session_state.report_pin_active = False
+if "report_coordinate_text" not in st.session_state:
+    st.session_state.report_coordinate_text = (
+        f"{DEFAULT_LATITUDE}, {DEFAULT_LONGITUDE}"
+    )
+if "report_latitude" not in st.session_state:
+    st.session_state.report_latitude = DEFAULT_LATITUDE
+if "report_longitude" not in st.session_state:
+    st.session_state.report_longitude = DEFAULT_LONGITUDE
+if "report_city" not in st.session_state:
+    st.session_state.report_city = ""
+if "pending_report_location" not in st.session_state:
+    st.session_state.pending_report_location = None
 
 
 frame: gpd.GeoDataFrame | None = None
@@ -469,10 +770,16 @@ city_boundaries: gpd.GeoDataFrame | None = None
 city_boundary_error: str | None = None
 city_boundary_version = "missing"
 database_settings: dict[str, str] | None = None
+google_sheets_settings: dict | None = None
 try:
     database_settings = get_database_settings()
 except ValueError as error:
     source_warning = str(error)
+
+try:
+    google_sheets_settings = get_google_sheets_settings()
+except ValueError as error:
+    st.warning(str(error))
 
 if database_settings is not None:
     try:
@@ -511,6 +818,20 @@ if CITY_BOUNDARY_FILE.exists():
         )
     except Exception as error:
         city_boundary_error = str(error)
+
+pending_report_location = st.session_state.pop("pending_report_location", None)
+if pending_report_location is not None:
+    pending_latitude, pending_longitude = pending_report_location
+    st.session_state.report_latitude = pending_latitude
+    st.session_state.report_longitude = pending_longitude
+    st.session_state.report_coordinate_text = (
+        f"{pending_latitude:.8f}, {pending_longitude:.8f}"
+    )
+    st.session_state.report_city = city_for_coordinate(
+        city_boundaries,
+        pending_latitude,
+        pending_longitude,
+    )
 
 end_dates: pd.Series | None = None
 valid_end_dates = pd.Series(dtype="object")
@@ -559,8 +880,8 @@ with st.sidebar:
         """
     )
 
-    location_tab, date_filter_tab, upload_tab = st.tabs(
-        ["Lat / Long", "Date filter", "Admin upload"]
+    location_tab, date_filter_tab, report_tab, upload_tab = st.tabs(
+        ["Lat / Long", "Date filter", "Report closure", "Admin upload"]
     )
     with location_tab:
         st.html(
@@ -663,6 +984,12 @@ with st.sidebar:
                 ):
                     st.session_state.date_filter_active = False
                     st.rerun()
+
+    with report_tab:
+        render_road_closure_report_form(
+            google_sheets_settings,
+            city_boundaries,
+        )
 
     with upload_tab:
         if database_settings is not None:
@@ -844,12 +1171,23 @@ st.html(
     """
 )
 
+map_latitude = (
+    st.session_state.report_latitude
+    if st.session_state.report_pin_active
+    else st.session_state.target_latitude
+)
+map_longitude = (
+    st.session_state.report_longitude
+    if st.session_state.report_pin_active
+    else st.session_state.target_longitude
+)
 closure_map = build_map(
     frame=display_frame,
     city_boundaries=city_boundaries,
-    latitude=st.session_state.target_latitude,
-    longitude=st.session_state.target_longitude,
+    latitude=map_latitude,
+    longitude=map_longitude,
     target_selected=st.session_state.target_selected,
+    report_pin_active=st.session_state.report_pin_active,
 )
 map_filter_key = (
     f"{st.session_state.date_filter_operator}-"
@@ -857,18 +1195,41 @@ map_filter_key = (
     if date_filter_active
     else "all"
 )
-st_folium(
+map_result = st_folium(
     closure_map,
     width=None,
     height=800,
-    returned_objects=[],
+    returned_objects=(
+        ["last_active_drawing"]
+        if st.session_state.report_pin_active
+        else []
+    ),
     key=(
         "closure-map-"
         f'{metadata.get("source_version", "0")}-'
         f"{city_boundary_version}-"
-        f"{map_filter_key}"
+        f"{map_filter_key}-"
+        f"pin-{int(st.session_state.report_pin_active)}"
     ),
 )
+
+if st.session_state.report_pin_active:
+    moved_pin = map_result.get("last_active_drawing")
+    moved_geometry = moved_pin.get("geometry", {}) if moved_pin else {}
+    moved_coordinates = moved_geometry.get("coordinates", [])
+    if moved_geometry.get("type") == "Point" and len(moved_coordinates) >= 2:
+        moved_longitude = float(moved_coordinates[0])
+        moved_latitude = float(moved_coordinates[1])
+        coordinate_changed = (
+            abs(moved_latitude - st.session_state.report_latitude) > 1e-9
+            or abs(moved_longitude - st.session_state.report_longitude) > 1e-9
+        )
+        if coordinate_changed:
+            st.session_state.pending_report_location = (
+                moved_latitude,
+                moved_longitude,
+            )
+            st.rerun()
 
 st.html(
     f"""
