@@ -421,6 +421,15 @@ def filter_by_end_date(
     return frame.loc[mask].copy()
 
 
+def filter_by_city(
+    frame: gpd.GeoDataFrame,
+    selected_city: str,
+) -> gpd.GeoDataFrame:
+    """Return road closures matching one normalized city value."""
+    city_values = frame["city"].fillna("").astype(str).str.strip()
+    return frame.loc[city_values == selected_city].copy()
+
+
 @st.cache_data(show_spinner=False)
 def load_geopackage(path: str, modified_ns: int) -> tuple[gpd.GeoDataFrame, dict]:
     layer_rows = pyogrio.list_layers(path)
@@ -743,6 +752,10 @@ if "date_filter_active" not in st.session_state:
     st.session_state.date_filter_active = False
 if "date_filter_operator" not in st.session_state:
     st.session_state.date_filter_operator = "="
+if "city_filter_active" not in st.session_state:
+    st.session_state.city_filter_active = False
+if "city_filter_value" not in st.session_state:
+    st.session_state.city_filter_value = "All cities"
 if "report_preview" not in st.session_state:
     st.session_state.report_preview = None
 if "report_pin_active" not in st.session_state:
@@ -839,6 +852,22 @@ if frame is not None and "endtz" in frame.columns:
     end_dates = parse_end_dates(frame)
     valid_end_dates = end_dates.dropna()
 
+city_options = ["All cities"]
+if frame is not None and "city" in frame.columns:
+    city_names = sorted(
+        {
+            str(value).strip()
+            for value in frame["city"].dropna()
+            if str(value).strip()
+        },
+        key=str.casefold,
+    )
+    city_options.extend(city_names)
+
+if st.session_state.city_filter_value not in city_options:
+    st.session_state.city_filter_value = "All cities"
+    st.session_state.city_filter_active = False
+
 if "date_filter_date" not in st.session_state:
     st.session_state.date_filter_date = (
         valid_end_dates.min()
@@ -881,7 +910,7 @@ with st.sidebar:
     )
 
     location_tab, date_filter_tab, report_tab, upload_tab = st.tabs(
-        ["Lat / Long", "Date filter", "Report closure", "Admin upload"]
+        ["Lat / Long", "Filters", "Report closure", "Admin upload"]
     )
     with location_tab:
         st.html(
@@ -921,6 +950,60 @@ with st.sidebar:
         )
 
     with date_filter_tab:
+        st.html(
+            """
+            <div class="rw-tool-intro">
+              <div class="rw-tool-icon">⌖</div>
+              <div>
+                <strong>Filter by city</strong>
+                <span>Show road closures for one city.</span>
+              </div>
+            </div>
+            """
+        )
+        if frame is None:
+            st.info("Connect or publish a data source to use city filters.")
+        elif "city" not in frame.columns:
+            st.warning("The active data source does not contain a city column.")
+        elif len(city_options) == 1:
+            st.warning("No valid city names were found in the city column.")
+        else:
+            with st.form("city_filter_form", border=False):
+                st.selectbox(
+                    "City",
+                    options=city_options,
+                    key="city_filter_value",
+                )
+                city_filter_submitted = st.form_submit_button(
+                    "Apply city filter",
+                    type="primary",
+                    width="stretch",
+                )
+
+            if city_filter_submitted:
+                st.session_state.city_filter_active = (
+                    st.session_state.city_filter_value != "All cities"
+                )
+
+            if st.session_state.city_filter_active:
+                st.html(
+                    f"""
+                    <div class="rw-filter-card">
+                      <span>Active city filter</span>
+                      <strong>{html.escape(st.session_state.city_filter_value)}</strong>
+                    </div>
+                    """
+                )
+                if st.button(
+                    "Clear city filter",
+                    width="stretch",
+                    key="clear_city_filter",
+                ):
+                    st.session_state.city_filter_active = False
+                    st.session_state.city_filter_value = "All cities"
+                    st.rerun()
+
+        st.divider()
         st.html(
             """
             <div class="rw-tool-intro">
@@ -1116,6 +1199,16 @@ if (
         st.session_state.date_filter_date,
     )
 
+if (
+    display_frame is not None
+    and "city" in display_frame.columns
+    and st.session_state.city_filter_active
+):
+    display_frame = filter_by_city(
+        display_frame,
+        st.session_state.city_filter_value,
+    )
+
 visible_feature_count = len(display_frame) if display_frame is not None else 0
 inactive_feature_count = (
     int(expiration_flags(display_frame).sum())
@@ -1129,11 +1222,17 @@ date_filter_active = bool(
     and end_dates is not None
     and st.session_state.date_filter_active
 )
+city_filter_active = bool(
+    frame is not None
+    and "city" in frame.columns
+    and st.session_state.city_filter_active
+)
+filters_active = date_filter_active or city_filter_active
 status_text = (
     (
         f"{visible_feature_count:,} of {total_feature_count:,} "
         "closure features visible"
-        if date_filter_active
+        if filters_active
         else f"{visible_feature_count:,} closure features visible"
     )
     if frame is not None and not load_error
@@ -1195,6 +1294,13 @@ map_filter_key = (
     if date_filter_active
     else "all"
 )
+city_filter_key = (
+    hashlib.sha1(
+        st.session_state.city_filter_value.encode("utf-8")
+    ).hexdigest()[:10]
+    if city_filter_active
+    else "all-cities"
+)
 map_result = st_folium(
     closure_map,
     width=None,
@@ -1209,6 +1315,7 @@ map_result = st_folium(
         f'{metadata.get("source_version", "0")}-'
         f"{city_boundary_version}-"
         f"{map_filter_key}-"
+        f"{city_filter_key}-"
         f"pin-{int(st.session_state.report_pin_active)}"
     ),
 )
