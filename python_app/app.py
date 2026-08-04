@@ -774,6 +774,12 @@ if "pending_report_location" not in st.session_state:
     st.session_state.pending_report_location = None
 
 
+def clear_city_filter() -> None:
+    """Reset the city filter before Streamlit recreates its selectbox."""
+    st.session_state.city_filter_active = False
+    st.session_state.city_filter_value = "All cities"
+
+
 frame: gpd.GeoDataFrame | None = None
 metadata = {"layers": [], "feature_count": 0, "source_version": "0"}
 load_error: str | None = None
@@ -994,14 +1000,12 @@ with st.sidebar:
                     </div>
                     """
                 )
-                if st.button(
+                st.button(
                     "Clear city filter",
                     width="stretch",
                     key="clear_city_filter",
-                ):
-                    st.session_state.city_filter_active = False
-                    st.session_state.city_filter_value = "All cities"
-                    st.rerun()
+                    on_click=clear_city_filter,
+                )
 
         st.divider()
         st.html(
